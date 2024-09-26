@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -131,45 +132,17 @@ func promptGetInput(pc promptContent) string {
 
 	return result
 }
-
-func installChart(cmd *cobra.Command, args []string) {
-	var installType string
-	if len(args) > 0 {
-		installType = args[0]
+func ifFolderExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
 	}
-	repoUrl := "https://helm.kubesense.ai/"
-	resp, err := http.Get(repoUrl + "index.yaml")
-	if err != nil {
-		log.Fatal(err)
+	if os.IsNotExist(err) {
+		return false, nil
 	}
-	defer resp.Body.Close()
-
-	// var helmRepoIndex map[string]interface{}
-	var helmRepoIndex HelmRepoIndex
-	// yamlFile, err := os.ReadFile("./index.yml")
-	yamlFile, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("yamlFile.Get err   #%v ", err)
-	}
-	err = yaml.Unmarshal(yamlFile, &helmRepoIndex)
-	if err != nil {
-		// log.Println((helmRepoIndex["entries"]).(map[interface{}]interface{})["kubesense"].([]interface{})[0].(map[interface{}]interface{})["urls"].([]interface{})[0])
-		log.Fatalf("Unmarshal: %v", err)
-	}
-	chartIndex := helmRepoIndex.Entries.Kubesense[0]
-	chartName := repoUrl + helmRepoIndex.Entries.Kubesense[0].Urls[0]
-	releaseName := "kubesense"
-	namespace := "kubesense"
-	if installType == "server" {
-		chartIndex = helmRepoIndex.Entries.Server[0]
-		chartName = repoUrl + helmRepoIndex.Entries.Server[0].Urls[0]
-		releaseName = "kubesense-server"
-	}
-	if installType == "sensor" {
-		chartIndex = helmRepoIndex.Entries.Kubesensor[0]
-		chartName = repoUrl + helmRepoIndex.Entries.Kubesensor[0].Urls[0]
-		releaseName = "kubesensor"
-	}
+	return false, err
+}
+func getUserPrompt() map[string]interface{} {
 	clusterName := promptGetInput(promptContent{
 		"Please provide a cluster name.",
 		"Name of the cluster you're installing for?",
@@ -187,10 +160,8 @@ func installChart(cmd *cobra.Command, args []string) {
 	})
 
 	values := map[string]interface{}{
-		"global": map[string]interface{}{
-			"cluster_name":      clusterName,
-			"dashboardHostName": dashboardHostName,
-		},
+		"cluster_name":      clusterName,
+		"dashboardHostName": dashboardHostName,
 	}
 	if promptConfirm(promptContent{"", "Do you have a specific node selector for kubesense?", "", true, ""}) {
 		nodeLabels := promptGetInput(promptContent{
@@ -233,12 +204,86 @@ func installChart(cmd *cobra.Command, args []string) {
 			},
 		}
 	}
-
-	if true {
-		values["ignoreLogsNamespace"] = []string{
-			"amazon-cloudwatch",
-		}
+	values = map[string]interface{}{
+		"global": values,
 	}
+	return values
+}
+func writeValuesToYamlFile(values map[string]interface{}, currentContext string) {
+	valuesYaml, _ := yaml.Marshal(values)
+	homedir, _ := os.UserHomeDir()
+	kubesensePath := filepath.Join(homedir, ".kubesense")
+	exists, _ := ifFolderExists(kubesensePath)
+	if !exists {
+		log.Println("creating folder")
+		os.Mkdir(kubesensePath, 0755)
+	}
+	valuesYamlFilePath := filepath.Join(kubesensePath, currentContext+"-"+"values.yaml")
+	err := os.WriteFile(valuesYamlFilePath, valuesYaml, 0644)
+	if err != nil {
+		log.Fatalf("error writing YAML file: %v", err)
+	}
+	fmt.Println("Values YAML file used for kubesense deployment is written successfully! to path", valuesYamlFilePath)
+}
+
+func readValuesFromYamlFile(currentContext string) map[string]interface{} {
+	homedir, _ := os.UserHomeDir()
+	kubesensePath := filepath.Join(homedir, ".kubesense")
+	valuesYamlFilePath := filepath.Join(kubesensePath, currentContext+"-"+"values.yaml")
+	valuesYaml, err := os.ReadFile(valuesYamlFilePath)
+	var values map[string]interface{}
+	err = yaml.Unmarshal(valuesYaml, values)
+	return values
+}
+func installChart(cmd *cobra.Command, args []string) {
+	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	config := clientcmd.GetConfigFromFileOrDie(kubeconfig)
+	if config != nil {
+		fmt.Println("Current k8s Context being used is", "\033[1m", config.CurrentContext, "\033[0m")
+	}
+	var installType string
+	if len(args) > 0 {
+		installType = args[0]
+	}
+	repoUrl := "https://helm.kubesense.ai/"
+	resp, err := http.Get(repoUrl + "index.yaml")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	// var helmRepoIndex map[string]interface{}
+	var helmRepoIndex HelmRepoIndex
+	// yamlFile, err := os.ReadFile("./index.yml")
+	yamlFile, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("yamlFile.Get err   #%v ", err)
+	}
+	err = yaml.Unmarshal(yamlFile, &helmRepoIndex)
+	if err != nil {
+		// log.Println((helmRepoIndex["entries"]).(map[interface{}]interface{})["kubesense"].([]interface{})[0].(map[interface{}]interface{})["urls"].([]interface{})[0])
+		log.Fatalf("Unmarshal: %v", err)
+	}
+	chartIndex := helmRepoIndex.Entries.Kubesense[0]
+	chartName := repoUrl + helmRepoIndex.Entries.Kubesense[0].Urls[0]
+	releaseName := "kubesense"
+	namespace := "kubesense"
+	if installType == "server" {
+		chartIndex = helmRepoIndex.Entries.Server[0]
+		chartName = repoUrl + helmRepoIndex.Entries.Server[0].Urls[0]
+		releaseName = "kubesense-server"
+	}
+	if installType == "sensor" {
+		chartIndex = helmRepoIndex.Entries.Kubesensor[0]
+		chartName = repoUrl + helmRepoIndex.Entries.Kubesensor[0].Urls[0]
+		releaseName = "kubesensor"
+	}
+
+	// if true {
+	// 	values["ignoreLogsNamespace"] = []string{
+	// 		"amazon-cloudwatch",
+	// 	}
+	// }
 	os.Setenv("HELM_NAMESPACE", namespace)
 	var settings = cli.New()
 	actionConfig := new(action.Configuration)
@@ -260,33 +305,26 @@ func installChart(cmd *cobra.Command, args []string) {
 		}
 		confirm, _ := prompt.Run()
 		if confirm == "y" {
+			values := getUserPrompt()
 			upgradeRelease(actionConfig, settings, namespace, releaseName, chartName, values)
+			writeValuesToYamlFile(values, config.CurrentContext)
 		} else {
 			log.Println("Exited without upgrading kubesense")
 		}
 	} else {
 		log.Println("Installation not found, doing a fresh installation")
+		values := getUserPrompt()
 		createNamespaceIfNotExists(namespace)
 		installRelease(actionConfig, settings, namespace, releaseName, chartName, values)
 	}
 }
 
 func checkReleaseExists(actionConfig *action.Configuration, releaseName string) (bool, interface{}) {
-	// Create a new Helm action client to get the release
 	client := action.NewGet(actionConfig)
-
-	// Try to get the release
 	release, err := client.Run(releaseName)
 	if err != nil {
-		// If the release is not found, return false (but not a fatal error)
-		// if action.IsReleaseNotFound(err) {
-		// 	return false, nil
-		// }
-		// Any other error should be returned
 		return false, err
 	}
-
-	// If the release is found, return true
 	return true, release
 }
 
