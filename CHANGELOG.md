@@ -17,7 +17,7 @@ We use the following categories for changes:
 ## [0.0.2] 30-Sep-2024
 
 ### Added
-- Update changelog v0.0.2
+- update workflow file type
 
 ### Changed
 
