@@ -17,8 +17,7 @@ We use the following categories for changes:
 ## [0.0.1] 30-Sep-2024
 
 ### Added
-1. Init kubesense cli
-1. Add goreleaser
+- Init kubesense cli
 
 ### Changed
 
