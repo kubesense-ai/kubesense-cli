@@ -14,7 +14,7 @@ We use the following categories for changes:
 - `Fixed` for any bug fixes.
 - `Security` in case of vulnerabilities.
 
-## [v0.0.1] 30-Sep-2024
+## [0.0.1] 30-Sep-2024
 
 ### Added
 1. Init kubesense cli
