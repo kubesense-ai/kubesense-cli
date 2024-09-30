@@ -14,6 +14,22 @@ We use the following categories for changes:
 - `Fixed` for any bug fixes.
 - `Security` in case of vulnerabilities.
 
+## [0.0.2] 30-Sep-2024
+
+### Added
+- Update changelog v0.0.2
+
+### Changed
+
+### Fixed
+
+### Removed
+
+### Deprecated
+
+### Security
+
+
 ## [0.0.1] 30-Sep-2024
 
 ### Added
