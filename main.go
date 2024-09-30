@@ -226,15 +226,15 @@ func writeValuesToYamlFile(values map[string]interface{}, currentContext string)
 	fmt.Println("Values YAML file used for kubesense deployment is written successfully! to path", valuesYamlFilePath)
 }
 
-func readValuesFromYamlFile(currentContext string) map[string]interface{} {
-	homedir, _ := os.UserHomeDir()
-	kubesensePath := filepath.Join(homedir, ".kubesense")
-	valuesYamlFilePath := filepath.Join(kubesensePath, currentContext+"-"+"values.yaml")
-	valuesYaml, err := os.ReadFile(valuesYamlFilePath)
-	var values map[string]interface{}
-	err = yaml.Unmarshal(valuesYaml, values)
-	return values
-}
+//	func readValuesFromYamlFile(currentContext string) map[string]interface{} {
+//		homedir, _ := os.UserHomeDir()
+//		kubesensePath := filepath.Join(homedir, ".kubesense")
+//		valuesYamlFilePath := filepath.Join(kubesensePath, currentContext+"-"+"values.yaml")
+//		valuesYaml, err := os.ReadFile(valuesYamlFilePath)
+//		var values map[string]interface{}
+//		err = yaml.Unmarshal(valuesYaml, values)
+//		return values
+//	}
 func installChart(cmd *cobra.Command, args []string) {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	config := clientcmd.GetConfigFromFileOrDie(kubeconfig)
