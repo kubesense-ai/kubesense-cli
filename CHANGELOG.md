@@ -14,26 +14,11 @@ We use the following categories for changes:
 - `Fixed` for any bug fixes.
 - `Security` in case of vulnerabilities.
 
-## [0.0.2] 30-Sep-2024
-
-### Added
-- update workflow file type
-
-### Changed
-
-### Fixed
-
-### Removed
-
-### Deprecated
-
-### Security
-
-
 ## [0.0.1] 30-Sep-2024
 
 ### Added
 - Init kubesense cli
+- Add Install.sh file
 
 ### Changed
 
