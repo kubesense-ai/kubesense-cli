@@ -148,7 +148,7 @@ func getUserPrompt() map[string]interface{} {
 		"Name of the cluster you're installing for?",
 		"",
 		true,
-		"^([0-9]*[a-zA-Z]){3,}[0-9]*$",
+		"^([0-9]*[a-zA-Z_-]){3,}[0-9]*$",
 	})
 
 	dashboardHostName := promptGetInput(promptContent{
