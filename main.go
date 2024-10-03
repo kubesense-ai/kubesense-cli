@@ -52,8 +52,8 @@ type HelmRepoIndex struct {
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "helm-cli",
-		Short: "A custom CLI to install Helm charts from a chart repository",
+		Use:   "kubesense",
+		Short: "A customeised CLI to install kubesense",
 	}
 
 	installCmd := &cobra.Command{

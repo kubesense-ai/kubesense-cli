@@ -9,6 +9,8 @@ cat << 'BANNER'
 ██║░╚██╗╚██████╔╝██████╦╝███████╗██████╔╝███████╗██║░╚███║██████╔╝███████╗
 ╚═╝░░╚═╝░╚═════╝░╚═════╝░╚══════╝╚═════╝░╚══════╝╚═╝░░╚══╝╚═════╝░╚══════╝   
 
+Start using kubesense by running: \033[1mkubesense install\033[1m
+
 BANNER
 }
 # Check OS and architecture
@@ -19,15 +21,16 @@ ARCH=$(uname -m)
 BINARY_NAME="kubesense"
 BINARY_BASE_URL=https://github.com/kubesense-ai/kubesense-cli/releases/latest/download
 INSTALL_DIR="/usr/local/bin"
+PLATFORM=""
 # Detect OS and architecture
 case "$OS" in
   Linux)
     case "$ARCH" in
       x86_64)
-        BINARY_URL="https://example.com/$BINARY_NAME-linux-amd64.tar.gz"
+        PLATFORM="_linux_amd64.tar.gz"
         ;;
       arm64|aarch64)
-        BINARY_URL="https://example.com/$BINARY_NAME-linux-arm64.tar.gz"
+        PLATFORM="_linux_arm64.tar.gz"
         ;;
       *)
         echo "Unsupported architecture: $ARCH on Linux"
@@ -38,10 +41,10 @@ case "$OS" in
   Darwin)
     case "$ARCH" in
       x86_64)
-        BINARY_URL="https://example.com/$BINARY_NAME-darwin-amd64.tar.gz"
+        PLATFORM="_darwin_amd64.tar.gz"
         ;;
       arm64)
-        BINARY_URL="https://example.com/$BINARY_NAME-darwin-arm64.tar.gz"
+        PLATFORM="_darwin_arm64.tar.gz"
         ;;
       *)
         echo "Unsupported architecture: $ARCH on macOS"
@@ -54,12 +57,12 @@ case "$OS" in
     exit 1
     ;;
 esac
-
+BINARY_URL="$BINARY_BASE_URL/$BINARY_NAME$PLATFORM"
 echo "Detected OS: $OS, Architecture: $ARCH"
 echo "Downloading binary from: $BINARY_URL"
 
 # Download the binary
-curl -L -o "$BINARY_NAME".tar.gz "$BINARY_URL" | tar -xzvf -
+curl -L -o $BINARY_NAME.tar.gz  "$BINARY_URL" && tar -zxvf $BINARY_NAME.tar.gz
 if [ $? -ne 0 ]; then
   echo "Failed to download binary"
   exit 1
@@ -70,8 +73,9 @@ chmod +x "$BINARY_NAME"
 
 # Move the binary to the installation directory
 echo "Installing $BINARY_NAME to $INSTALL_DIR"
-# sudo mv "$BINARY_NAME" "$INSTALL_DIR/"
+sudo mv "$BINARY_NAME" "$INSTALL_DIR/"
 rm "$BINARY_NAME".tar.gz
+
 # Add to PATH if not already
 if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
   echo "Adding $INSTALL_DIR to PATH"

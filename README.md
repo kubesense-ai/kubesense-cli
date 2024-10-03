@@ -10,12 +10,15 @@ Before you begin the installation, ensure you have the following:
 
 ## Installation Steps
 
-Follow these steps to install the binary using the provided shell script:
+Follow these steps to install the <strong>kubesense</strong> binary using the provided shell script:
 
-1. **Download the Script**
-
-   First, download the installation script (`install.sh`). You can do this via `curl` or `wget`:
-
+1. **Download and execute the installation script**
+   
+   You can do this via `curl` or `wget`:
    ```bash
-   curl -O https://kubesense.ai/install.sh
+   curl -s -L https://cli.kubesense.ai/install.sh | bash
+   ```
+   
+   ```bash
+   wget -O - https://cli.kubesense.ai/install.sh | bash
    ```
