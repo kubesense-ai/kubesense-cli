@@ -153,7 +153,7 @@ func getUserPrompt() map[string]interface{} {
 
 	dashboardHostName := promptGetInput(promptContent{
 		"Please provide a dashboard host name.",
-		"What namespace would you like to install for?",
+		"What will be the url used for accessing kubesense-webapp?",
 		"kubesense.example-company.com",
 		true,
 		"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$",
@@ -423,6 +423,7 @@ func uninstallChart(cmd *cobra.Command, args []string) {
 	}
 	releaseName := "kubesense"
 	namespace := "kubesense"
+	os.Setenv("HELM_NAMESPACE", namespace)
 	if installType == "server" {
 		releaseName = "kubesense-server"
 	}
