@@ -48,6 +48,30 @@ type HelmRepoIndex struct {
 	Entries TypeEntries `yaml:"entries"`
 }
 
+type MatchExpressionsStruct struct {
+	Key      string `yaml:"key"`
+	Values   string `yaml:"values"`
+	Operator string `yaml:"operator"`
+}
+type LabelSelectorStruct struct {
+	MatchExpressions []MatchExpressionsStruct `yaml:"matchExpressions"`
+}
+type TolerationsStruct struct {
+	Key      string `yaml:"key"`
+	Operator string `yaml:"operator"`
+	Value    string `yaml:"value"`
+	Effect   string `yaml:"effect"`
+}
+type GlobalValuesStruct struct {
+	ClusterName               string                 `yaml:"cluster_name"`
+	DashboardHostName         string                 `yaml:"dashboardHostName"`
+	NodeAffinityLabelSelector []*LabelSelectorStruct `yaml:"nodeAffinityLabelSelector"`
+	Tolerations               []*TolerationsStruct   `yaml:"tolerations"`
+}
+type ValuesStruct struct {
+	Global GlobalValuesStruct `yaml:"global"`
+}
+
 // Initialize the CLI environment
 
 func main() {
@@ -142,11 +166,23 @@ func ifFolderExists(path string) (bool, error) {
 	}
 	return false, err
 }
-func getUserPrompt() map[string]interface{} {
+func getUserPrompt(defaultValues ValuesStruct) map[string]interface{} {
+	defaultClusterName := ""
+	defaultDashboardHostName := "kubesense.example-company.com"
+	defaultNodeLabels := ""
+	defaultTolerations := ""
+	retrievedClusterName := defaultValues.Global.ClusterName
+	if retrievedClusterName != "" {
+		defaultClusterName = retrievedClusterName
+	}
+	retrievedDashboardHostName := defaultValues.Global.DashboardHostName
+	if retrievedDashboardHostName != "" {
+		defaultDashboardHostName = retrievedDashboardHostName
+	}
 	clusterName := promptGetInput(promptContent{
 		"Please provide a cluster name.",
 		"Name of the cluster you're installing for?",
-		"",
+		defaultClusterName,
 		true,
 		"^([0-9]*[a-zA-Z_-]){3,}[0-9]*$",
 	})
@@ -154,7 +190,7 @@ func getUserPrompt() map[string]interface{} {
 	dashboardHostName := promptGetInput(promptContent{
 		"Please provide a dashboard host name.",
 		"What will be the url used for accessing kubesense-webapp?",
-		"kubesense.example-company.com",
+		defaultDashboardHostName,
 		true,
 		"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$",
 	})
@@ -163,11 +199,16 @@ func getUserPrompt() map[string]interface{} {
 		"cluster_name":      clusterName,
 		"dashboardHostName": dashboardHostName,
 	}
+	retrievedNodeAffinity := defaultValues.Global.NodeAffinityLabelSelector
+	if len(retrievedNodeAffinity) > 0 && retrievedNodeAffinity[0] != nil && len(retrievedNodeAffinity[0].MatchExpressions) > 0 {
+		retrievedNodeMatchExpression := retrievedNodeAffinity[0].MatchExpressions[0]
+		defaultNodeLabels = retrievedNodeMatchExpression.Key + "=" + retrievedNodeMatchExpression.Values
+	}
 	if promptConfirm(promptContent{"", "Do you have a specific node selector for kubesense?", "", true, ""}) {
 		nodeLabels := promptGetInput(promptContent{
 			"Please provide a node labels.",
 			"Provide node selector labels(Eg. key=value)",
-			"",
+			defaultNodeLabels,
 			true,
 			"^([a-zA-Z0-9_-]+)=([a-zA-Z0-9_-]+)$",
 		})
@@ -184,12 +225,16 @@ func getUserPrompt() map[string]interface{} {
 			},
 		}
 	}
-
+	retrievedTolerations := defaultValues.Global.Tolerations
+	if len(defaultValues.Global.Tolerations) > 0 && defaultValues.Global.Tolerations[0] != nil {
+		retrievedTolerationsItem := retrievedTolerations[0]
+		defaultTolerations = retrievedTolerationsItem.Key + "=" + retrievedTolerationsItem.Value + ":" + retrievedTolerationsItem.Effect
+	}
 	if promptConfirm(promptContent{"", "Do you have a any tolerations to be added for server components?", "", true, ""}) {
 		toleration := promptGetInput(promptContent{
 			"Please provide a valid toleration.",
 			"Provide tolerations(Eg. key=value:NoSchedule)",
-			"",
+			defaultTolerations,
 			true,
 			"^([a-zA-Z0-9_-]+)=([a-zA-Z0-9_-]+):(NoSchedule|NoExecute|PreferNoSchedule)+$",
 		})
@@ -226,15 +271,24 @@ func writeValuesToYamlFile(values map[string]interface{}, currentContext string)
 	fmt.Println("Values YAML file used for kubesense deployment is written successfully! to path", valuesYamlFilePath)
 }
 
-//	func readValuesFromYamlFile(currentContext string) map[string]interface{} {
-//		homedir, _ := os.UserHomeDir()
-//		kubesensePath := filepath.Join(homedir, ".kubesense")
-//		valuesYamlFilePath := filepath.Join(kubesensePath, currentContext+"-"+"values.yaml")
-//		valuesYaml, err := os.ReadFile(valuesYamlFilePath)
-//		var values map[string]interface{}
-//		err = yaml.Unmarshal(valuesYaml, values)
-//		return values
-//	}
+func readValuesFromYamlFile(currentContext string) (ValuesStruct, error) {
+	homedir, _ := os.UserHomeDir()
+	kubesensePath := filepath.Join(homedir, ".kubesense")
+	valuesYamlFilePath := filepath.Join(kubesensePath, currentContext+"-"+"values.yaml")
+	valuesYaml, err := os.ReadFile(valuesYamlFilePath)
+	if err != nil {
+		return ValuesStruct{}, fmt.Errorf("ERROR reading the file %v", err)
+	}
+	var values ValuesStruct
+	err = yaml.Unmarshal(valuesYaml, &values)
+	if err != nil {
+		fmt.Println(values, err)
+		return ValuesStruct{}, fmt.Errorf("ERROR unmarshaling yaml %v", err)
+	}
+
+	return values, nil
+}
+
 func installChart(cmd *cobra.Command, args []string) {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	config := clientcmd.GetConfigFromFileOrDie(kubeconfig)
@@ -265,17 +319,17 @@ func installChart(cmd *cobra.Command, args []string) {
 		log.Fatalf("Unmarshal: %v", err)
 	}
 	chartIndex := helmRepoIndex.Entries.Kubesense[0]
-	chartName := repoUrl + helmRepoIndex.Entries.Kubesense[0].Urls[0]
+	chartName := helmRepoIndex.Entries.Kubesense[0].Urls[0]
 	releaseName := "kubesense"
 	namespace := "kubesense"
 	if installType == "server" {
 		chartIndex = helmRepoIndex.Entries.Server[0]
-		chartName = repoUrl + helmRepoIndex.Entries.Server[0].Urls[0]
+		chartName = helmRepoIndex.Entries.Server[0].Urls[0]
 		releaseName = "kubesense-server"
 	}
 	if installType == "sensor" {
 		chartIndex = helmRepoIndex.Entries.Kubesensor[0]
-		chartName = repoUrl + helmRepoIndex.Entries.Kubesensor[0].Urls[0]
+		chartName = helmRepoIndex.Entries.Kubesensor[0].Urls[0]
 		releaseName = "kubesensor"
 	}
 
@@ -296,6 +350,7 @@ func installChart(cmd *cobra.Command, args []string) {
 	// }
 	if isReleaseExists {
 		chartMetaData := release.(*helmRelease.Release).Chart.Metadata
+		defaultValues, _ := readValuesFromYamlFile(config.CurrentContext)
 		prompt := promptui.Prompt{
 			Label: "Current installed chart version is " + chartMetaData.Version + ", do you want to Upgrade Kubesense to " + chartIndex.Version + "?",
 			Templates: &promptui.PromptTemplates{
@@ -304,8 +359,55 @@ func installChart(cmd *cobra.Command, args []string) {
 			IsConfirm: true,
 		}
 		confirm, _ := prompt.Run()
+
 		if confirm == "y" {
-			values := getUserPrompt()
+			marshaledValues, _ := yaml.Marshal(defaultValues)
+			fmt.Println(string(marshaledValues))
+			prompt := promptui.Prompt{
+				Label: "Yaml used for previous deployment, do you want to edit?",
+				Templates: &promptui.PromptTemplates{
+					Prompt: "{{ . | orange }}",
+				},
+				IsConfirm: true,
+			}
+			confirm, _ := prompt.Run()
+			var values map[string]interface{}
+			if confirm == "y" {
+				values = getUserPrompt(defaultValues)
+			} else {
+				values = map[string]interface{}{
+					"cluster_name":      defaultValues.Global.ClusterName,
+					"dashboardHostName": defaultValues.Global.DashboardHostName,
+				}
+				if len(defaultValues.Global.NodeAffinityLabelSelector) > 0 && defaultValues.Global.NodeAffinityLabelSelector[0] != nil && len(defaultValues.Global.NodeAffinityLabelSelector[0].MatchExpressions) > 0 {
+					matchExpressionItem := defaultValues.Global.NodeAffinityLabelSelector[0].MatchExpressions[0]
+					values["nodeAffinityLabelSelector"] = []map[string]interface{}{
+						{
+							"matchExpressions": []map[string]string{
+								{
+									"key":      matchExpressionItem.Key,
+									"operator": matchExpressionItem.Operator,
+									"values":   matchExpressionItem.Values,
+								},
+							},
+						},
+					}
+				}
+				if len(defaultValues.Global.Tolerations) > 0 && defaultValues.Global.Tolerations[0] != nil {
+					tolerationItem := defaultValues.Global.Tolerations[0]
+					values["tolerations"] = []map[string]string{
+						{
+							"key":      tolerationItem.Key,
+							"operator": tolerationItem.Operator,
+							"value":    tolerationItem.Value,
+							"effect":   tolerationItem.Effect,
+						},
+					}
+				}
+				values = map[string]interface{}{
+					"global": values,
+				}
+			}
 			upgradeRelease(actionConfig, settings, namespace, releaseName, chartName, values)
 			writeValuesToYamlFile(values, config.CurrentContext)
 		} else {
@@ -313,9 +415,10 @@ func installChart(cmd *cobra.Command, args []string) {
 		}
 	} else {
 		log.Println("Installation not found, doing a fresh installation")
-		values := getUserPrompt()
+		values := getUserPrompt(ValuesStruct{})
 		createNamespaceIfNotExists(namespace)
 		installRelease(actionConfig, settings, namespace, releaseName, chartName, values)
+		writeValuesToYamlFile(values, config.CurrentContext)
 	}
 }
 
