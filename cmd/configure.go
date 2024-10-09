@@ -8,7 +8,7 @@ import (
 
 var configureCmd = &cobra.Command{
 	Use:   "configure [ACCESS_TOKEN]",
-	Short: "Installs kubesense",
+	Short: "Configures kubesense",
 	Run: func(cmd *cobra.Command, args []string) {
 		helm.ConfigureKubesense(cmd, args)
 	},
