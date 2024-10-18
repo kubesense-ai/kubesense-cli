@@ -1,0 +1,17 @@
+{
+    "name": "kubesense-cli",
+    "private": true,
+    "scripts": {
+      "release": "semantic-release"
+    },
+    "devDependencies": {
+      "semantic-release": "^20.0.2"
+    },
+    "plugins": [
+        ["@semantic-release/npm", {
+          "npmPublish": false
+        }]
+      ],
+    "release": { "branches": [ "main" ] }
+  }
+  
