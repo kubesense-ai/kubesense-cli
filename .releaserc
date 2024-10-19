@@ -1,5 +1,7 @@
 {
     "branches": ["main"],
+    "dryRun": false,
+    "ci": false,
     "repositoryUrl": "https://github.com/yourusername/your-repo",
     "plugins": [
       "@semantic-release/commit-analyzer",
@@ -15,3 +17,4 @@
       ]
     ]
   }
+  
