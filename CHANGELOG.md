@@ -1,3 +1,10 @@
+## [0.1.1](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.0...v0.1.1) (2024-10-21)
+
+
+### Bug Fixes
+
+* **CHANGELOG:** update changelog format ([4e1d382](https://github.com/kubesense-ai/kubesense-cli/commit/4e1d382b98ba301c1a3dfefc84957b6104bc0d29))
+
 # [0.1.0](https://github.com/kubesense-ai/kubesense-cli/compare/v0.0.3...v0.1.0) (2024-10-21)
 
 
