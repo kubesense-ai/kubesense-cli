@@ -1,4 +1,4 @@
-name: cli-release
+name: cli-release-workflow
 
 on:
   push:

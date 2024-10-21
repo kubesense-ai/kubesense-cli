@@ -1,4 +1,4 @@
-name: semantic-versioning
+name: semantic-versioning-workflow
 
 on:
   push:
