@@ -13,7 +13,7 @@
     "repositoryUrl": "https://github.com/kubesense-ai/kubesense-cli",
     "release": {
         "branches": [
-            "main"
+            "dev"
         ],
         "plugins": [
             [
