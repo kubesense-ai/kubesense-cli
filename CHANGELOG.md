@@ -1,3 +1,10 @@
+## [0.1.3](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.2...v0.1.3) (2024-10-21)
+
+
+### Bug Fixes
+
+* **semver:** tags workflow not getting triggered ([5abe0c5](https://github.com/kubesense-ai/kubesense-cli/commit/5abe0c51141dc61f9a737c32583f4d2c8791cecd))
+
 ## [0.1.2](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.1...v0.1.2) (2024-10-21)
 
 
