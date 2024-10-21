@@ -1,3 +1,15 @@
+# [0.1.0](https://github.com/kubesense-ai/kubesense-cli/compare/v0.0.3...v0.1.0) (2024-10-21)
+
+
+### Features
+
+* **main:** Add auto releaser ([214d615](https://github.com/kubesense-ai/kubesense-cli/commit/214d615f3f4f0e611088177cbae76ee414294dac))
+
+
+### Performance Improvements
+
+* **semantic-release:** Add releaserc chamges ([91c567e](https://github.com/kubesense-ai/kubesense-cli/commit/91c567edb7a85865332d3763541a040410e1585a))
+
 # Changelog
 
 All notable changes to this project are documented in this file.
