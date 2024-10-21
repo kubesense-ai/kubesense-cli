@@ -1,4 +1,4 @@
-name: semver-release
+name: semantic-versioning
 
 on:
   push:
