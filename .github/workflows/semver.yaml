@@ -3,7 +3,7 @@ name: semantic-versioning
 on:
   push:
     branches:
-      - dev
+      - main
 
 jobs:
   goreleaser:
