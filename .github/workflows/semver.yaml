@@ -1,22 +1,22 @@
-name: semantic-versioning-workflow
+# name: semantic-versioning-workflow
 
-on:
-  push:
-    branches:
-      - main
+# on:
+#   push:
+#     branches:
+#       - main
 
-jobs:
-  semantic-versioning:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      -
-        name: Checkout
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-      - name: Semantic Release
-        uses: cycjimmy/semantic-release-action@v4
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+# jobs:
+#   semantic-versioning:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write
+#     steps:
+#       -
+#         name: Checkout
+#         uses: actions/checkout@v3
+#         with:
+#           fetch-depth: 0
+#       - name: Semantic Release
+#         uses: cycjimmy/semantic-release-action@v4
+#         env:
+#           GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
