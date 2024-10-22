@@ -6,7 +6,7 @@ on:
       - main
 
 jobs:
-  goreleaser:
+  semantic-versioning:
     runs-on: ubuntu-latest
     permissions:
       contents: write
