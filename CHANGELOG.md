@@ -1,3 +1,10 @@
+## [0.1.4](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.3...v0.1.4) (2024-10-22)
+
+
+### Bug Fixes
+
+* **semver:** job name of semver workflow updated ([7b38f2f](https://github.com/kubesense-ai/kubesense-cli/commit/7b38f2f937d862304b5380316cc6cdc7f1c10a8e))
+
 ## [0.1.3](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.2...v0.1.3) (2024-10-21)
 
 
