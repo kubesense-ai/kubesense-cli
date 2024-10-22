@@ -1,3 +1,10 @@
+## [0.1.6](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.5...v0.1.6) (2024-10-22)
+
+
+### Performance Improvements
+
+* **semver:** Add npm based semver release ([322463f](https://github.com/kubesense-ai/kubesense-cli/commit/322463f5699086e848bcd0885777562a0773b5b3))
+
 ## [0.1.5](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.4...v0.1.5) (2024-10-22)
 
 
