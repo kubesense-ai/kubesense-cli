@@ -1,3 +1,10 @@
+## [0.1.5](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.4...v0.1.5) (2024-10-22)
+
+
+### Bug Fixes
+
+* **semver:** Update env to GITHUB_TOKEN ([c6da38b](https://github.com/kubesense-ai/kubesense-cli/commit/c6da38b7221ebe007de2b03f5e5c1f1a094d01c5))
+
 ## [0.1.4](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.3...v0.1.4) (2024-10-22)
 
 
