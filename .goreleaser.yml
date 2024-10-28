@@ -15,9 +15,10 @@ builds:
       - amd64
       - arm64
     ldflags:
-      - '-X kubesense.ai/cmd.BinaryVersion={{ .Version }}'
-      - '-X kubesense.ai/cmd.date={{ .CommitTimestamp }}'
-      - '-X kubesense.ai/cmd.commit={{ .Commit }}'
+      - '-X kubesense-cli/cmd.BinaryVersion={{ .Version }}'
+      - '-X kubesense-cli/cmd.version={{ .Version }}'
+      - '-X kubesense-cli/cmd.date={{ .CommitTimestamp }}'
+      - '-X kubesense-cli/cmd.commit={{ .Commit }}'
 archives:
   -
     format: tar.gz
