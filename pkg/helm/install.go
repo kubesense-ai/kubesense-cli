@@ -1,9 +1,11 @@
 package helm
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"kubesense-cli/pkg/k8s"
+	"kubesense-cli/pkg/prompt"
 	customPrompt "kubesense-cli/pkg/prompt"
 	"kubesense-cli/types"
 	"kubesense-cli/utils"
@@ -19,18 +21,43 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/cli"
 	helmRelease "helm.sh/helm/v3/pkg/release"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
 func InstallChart(cmd *cobra.Command, args []string) {
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	conf, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	config := clientcmd.GetConfigFromFileOrDie(kubeconfig)
 	if config != nil {
 		fmt.Println("Current k8s Context being used is", "\033[1m", config.CurrentContext, "\033[0m")
 	}
+	if err != nil {
+		log.Fatalf("Failed to load kubeconfig: %v", err)
+	}
+
+	// Create the clientset
+	clientset, err := kubernetes.NewForConfig(conf)
+	if err != nil {
+		log.Fatalf("Failed to create Kubernetes client: %v", err)
+	}
+
 	var installType string
 	if len(args) > 0 {
 		installType = args[0]
+	} else {
+		options := []prompt.Option{
+			{Name: "incluster", Description: "Ideal for setting up in a single cluster environment"},
+			{Name: "server", Description: "Centralised server for multi-cluster setup"},
+			{Name: "sensor", Description: " Only Sensor's will be deployed"},
+		}
+		selectedOption, err := prompt.PromptSelect(options)
+		if err != nil {
+			log.Fatal("Error running installation")
+		}
+		installType = options[*selectedOption].Name
 	}
 	repoUrl := "https://helm.kubesense.ai/"
 	resp, err := http.Get(repoUrl + "index.yaml")
@@ -72,11 +99,24 @@ func InstallChart(cmd *cobra.Command, args []string) {
 	// 	}
 	// }
 	os.Setenv("HELM_NAMESPACE", namespace)
+	var secretName = "registry-credentials"
 	var settings = cli.New()
 	actionConfig := new(action.Configuration)
 	if err := actionConfig.Init(settings.RESTClientGetter(), namespace, os.Getenv("HELM_DRIVER"), log.Printf); err != nil {
 		log.Fatalf("Failed to initialize Helm configuration: %v", err)
 	}
+
+	_, err = clientset.CoreV1().Secrets(namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Fatalf("Secret '%s' does not exist in namespace '%s'.\nRun kubesense configure <TOKEN>", secretName, namespace)
+		} else {
+			log.Fatalf("Error retrieving secret: %v", err)
+		}
+	} else {
+		log.Printf("Secret '%s' exists in namespace '%s'.\n", secretName, namespace)
+	}
+
 	isReleaseExists, release := CheckReleaseExists(actionConfig, releaseName)
 	// if err != nil {
 	// 	log.Fatalln("Error checking for releasename", err)

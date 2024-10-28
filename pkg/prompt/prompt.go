@@ -11,6 +11,43 @@ import (
 	"github.com/manifoldco/promptui"
 )
 
+type Option struct {
+	Name        string
+	Description string
+}
+
+func PromptSelect(options []Option) (index *int, err error) {
+	// Create a custom template with name and description
+	templates := &promptui.SelectTemplates{
+		Label:    "{{ . }}?",
+		Active:   "▶️  {{ .Name | cyan }} - {{ .Description | faint }}",
+		Inactive: "   {{ .Name | cyan }} - {{ .Description | faint }}",
+		Selected: "▶️  {{ .Name | green }}",
+		Details: `
+--------- Details ----------
+{{ "Name:" | faint }}        {{ .Name }}
+{{ "Description:" | faint }} {{ .Description }}`,
+	}
+
+	// Initialize the select prompt with the options and template
+	prompt := promptui.Select{
+		Label:     "Select an Option",
+		Items:     options,
+		Templates: templates,
+		Size:      5,
+	}
+
+	// Run the prompt
+	i, _, err := prompt.Run()
+
+	if err != nil {
+		fmt.Printf("Prompt failed %v\n", err)
+		return nil, err
+	}
+
+	return &i, nil
+}
+
 func promptConfirm(pc types.PromptContent) bool {
 	prompt := promptui.Prompt{
 		Label: pc.Label,
