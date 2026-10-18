@@ -1,0 +1,5 @@
+apiVersion: v2
+name: app
+version: 0.1.0
+appVersion: "1.0"
+description: Spike fixture - one Deployment, one ConfigMap, one pre-install/pre-upgrade hook, deployment-info Secret.

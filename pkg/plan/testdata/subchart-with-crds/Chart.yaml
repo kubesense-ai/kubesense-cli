@@ -1,0 +1,4 @@
+apiVersion: v2
+name: widgets
+version: 0.1.0
+description: Spike fixture - subchart shipping crds/; tests copy it into app/charts/.
