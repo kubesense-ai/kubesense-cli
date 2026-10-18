@@ -82,19 +82,19 @@ func GetUserPrompt(defaultValues types.ValuesStruct) map[string]interface{} {
 		defaultDashboardHostName = retrievedDashboardHostName
 	}
 	clusterName := promptGetInput(types.PromptContent{
-		"Please provide a cluster name.",
-		"Name of the cluster you're installing for?",
-		defaultClusterName,
-		true,
-		"^([0-9]*[a-zA-Z_-]){3,}[0-9]*$",
+		ErrorMsg:     "Please provide a cluster name.",
+		Label:        "Name of the cluster you're installing for?",
+		DefaultValue: defaultClusterName,
+		AllowEdit:    true,
+		Regex:        "^([0-9]*[a-zA-Z_-]){3,}[0-9]*$",
 	})
 
 	dashboardHostName := promptGetInput(types.PromptContent{
-		"Please provide a dashboard host name.",
-		"What will be the url used for accessing kubesense-webapp?",
-		defaultDashboardHostName,
-		true,
-		"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$",
+		ErrorMsg:     "Please provide a dashboard host name.",
+		Label:        "What will be the url used for accessing kubesense-webapp?",
+		DefaultValue: defaultDashboardHostName,
+		AllowEdit:    true,
+		Regex:        "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$",
 	})
 
 	values := map[string]interface{}{
@@ -106,13 +106,13 @@ func GetUserPrompt(defaultValues types.ValuesStruct) map[string]interface{} {
 		retrievedNodeMatchExpression := retrievedNodeAffinity[0].MatchExpressions[0]
 		defaultNodeLabels = retrievedNodeMatchExpression.Key + "=" + retrievedNodeMatchExpression.Values
 	}
-	if promptConfirm(types.PromptContent{"", "Do you have a specific node selector for kubesense?", "", true, ""}) {
+	if promptConfirm(types.PromptContent{ErrorMsg: "", Label: "Do you have a specific node selector for kubesense?", DefaultValue: "", AllowEdit: true, Regex: ""}) {
 		nodeLabels := promptGetInput(types.PromptContent{
-			"Please provide a node labels.",
-			"Provide node selector labels(Eg. key=value)",
-			defaultNodeLabels,
-			true,
-			"^([a-zA-Z0-9_-]+)=([a-zA-Z0-9_-]+)$",
+			ErrorMsg:     "Please provide a node labels.",
+			Label:        "Provide node selector labels(Eg. key=value)",
+			DefaultValue: defaultNodeLabels,
+			AllowEdit:    true,
+			Regex:        "^([a-zA-Z0-9_-]+)=([a-zA-Z0-9_-]+)$",
 		})
 		nodeKeyAndLabel := strings.SplitN(nodeLabels, "=", 2)
 		values["nodeAffinityLabelSelector"] = []map[string]interface{}{
@@ -132,13 +132,13 @@ func GetUserPrompt(defaultValues types.ValuesStruct) map[string]interface{} {
 		retrievedTolerationsItem := retrievedTolerations[0]
 		defaultTolerations = retrievedTolerationsItem.Key + "=" + retrievedTolerationsItem.Value + ":" + retrievedTolerationsItem.Effect
 	}
-	if promptConfirm(types.PromptContent{"", "Do you have a any tolerations to be added for server components?", "", true, ""}) {
+	if promptConfirm(types.PromptContent{ErrorMsg: "", Label: "Do you have a any tolerations to be added for server components?", DefaultValue: "", AllowEdit: true, Regex: ""}) {
 		toleration := promptGetInput(types.PromptContent{
-			"Please provide a valid toleration.",
-			"Provide tolerations(Eg. key=value:NoSchedule)",
-			defaultTolerations,
-			true,
-			"^([a-zA-Z0-9_-]+)=([a-zA-Z0-9_-]+):(NoSchedule|NoExecute|PreferNoSchedule)+$",
+			ErrorMsg:     "Please provide a valid toleration.",
+			Label:        "Provide tolerations(Eg. key=value:NoSchedule)",
+			DefaultValue: defaultTolerations,
+			AllowEdit:    true,
+			Regex:        "^([a-zA-Z0-9_-]+)=([a-zA-Z0-9_-]+):(NoSchedule|NoExecute|PreferNoSchedule)+$",
 		})
 		keyAndLabel := strings.SplitN(toleration, "=", 2)
 		effect := strings.SplitN(keyAndLabel[1], ":", 2)
