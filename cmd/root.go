@@ -23,4 +23,7 @@ func init() {
 	rootCmd.AddCommand(installCmd)
 	rootCmd.AddCommand(uninstallCmd)
 	rootCmd.AddCommand(configureCmd)
+	rootCmd.AddCommand(planCmd)
+	rootCmd.AddCommand(showCmd)
+	rootCmd.AddCommand(applyCmd)
 }
