@@ -72,7 +72,7 @@ func (f *fixture) plan(allowImpure bool) *Plan {
 	f.t.Helper()
 	p, err := MakePlan(context.Background(), Options{
 		Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart,
-		OverridesFile: f.overrides, AllowImpureTemplates: allowImpure,
+		OverridesFile: f.overrides, AllowImpureTemplates: allowImpure, Strict: true,
 	})
 	if err != nil {
 		f.t.Fatalf("plan: %v", err)
@@ -244,7 +244,7 @@ func TestAccept_LookupInputChange(t *testing.T) {
 		t.Run("lint-rejects-at-plan", func(t *testing.T) {
 			f := setup(t, mode, "lookup")
 			before := snapshot(t, f.ns)
-			_, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides})
+			_, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides, Strict: true})
 			var le *LintError
 			if !errors.As(err, &le) {
 				t.Fatalf("want LintError, got %v", err)
@@ -281,7 +281,7 @@ func TestAccept_LookupInputChange(t *testing.T) {
 func TestImpureChartWithoutLintNeverApplies(t *testing.T) {
 	forModes(t, func(t *testing.T, mode string) {
 		f := setup(t, mode, "random")
-		_, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides})
+		_, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides, Strict: true})
 		var le *LintError
 		if !errors.As(err, &le) {
 			t.Fatalf("want LintError, got %v", err)
@@ -426,7 +426,7 @@ func TestAccept_ChartWithCRDs(t *testing.T) {
 				f := setup(t, mode, "app")
 				v.add(t, f.chart)
 				before := snapshot(t, f.ns)
-				_, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides})
+				_, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides, Strict: true})
 				var ce *CRDError
 				if !errors.As(err, &ce) {
 					t.Fatalf("want CRDError, got %v", err)
@@ -533,7 +533,7 @@ func TestGitOpsBaselineRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides}); err == nil || !strings.Contains(err.Error(), "GitOps") {
+	if _, err := MakePlan(context.Background(), Options{Target: testTarget, ReleaseName: relName, Namespace: f.ns, ChartPath: f.chart, OverridesFile: f.overrides, Strict: true}); err == nil || !strings.Contains(err.Error(), "GitOps") {
 		t.Fatalf("want GitOps refusal, got %v", err)
 	}
 }
@@ -553,11 +553,8 @@ contexts:
   context: {cluster: remote, user: u}
 current-context: remote
 `)
-	_, err := Target{Kubeconfig: kc}.connect("default", nil, nil)
+	_, err := Target{Kubeconfig: kc, RequireLoopback: true}.connect("default", nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "not loopback") {
 		t.Fatalf("want loopback refusal, got %v", err)
-	}
-	if _, err := (Target{}).connect("default", nil, nil); err == nil {
-		t.Fatal("empty kubeconfig must be refused")
 	}
 }

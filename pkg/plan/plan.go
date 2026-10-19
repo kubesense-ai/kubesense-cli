@@ -1,7 +1,8 @@
-// Package plan implements the spike for a Terraform-style plan / show / apply
-// workflow on top of the embedded Helm SDK (helm.sh/helm/v3 v3.16.1).
-//
-// See SPIKE-PLAN-APPLY.md at the repository root for findings.
+// Package plan implements a Terraform-style plan / show workflow on top of the
+// embedded Helm SDK (helm.sh/helm/v3 v3.16.1): render the chart against the live
+// cluster without writing anything, and show what an install or upgrade would
+// change. The apply half (gate, write barrier) is kept and tested here but not
+// exposed by the CLI yet; see SPIKE-PLAN-APPLY.md at the repository root.
 package plan
 
 import (
@@ -19,6 +20,7 @@ import (
 	"helm.sh/helm/v3/pkg/chart"
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
+	"helm.sh/helm/v3/pkg/cli"
 	"helm.sh/helm/v3/pkg/release"
 	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -66,6 +68,8 @@ type Plan struct {
 	Speculative   bool      `json:"speculative"`
 
 	ServerURL   string `json:"serverURL"`
+	Context     string `json:"context,omitempty"`
+	ClusterID   string `json:"clusterID,omitempty"` // kube-system namespace UID
 	ReleaseName string `json:"releaseName"`
 	Namespace   string `json:"namespace"`
 	Action      string `json:"action"` // install | upgrade
@@ -88,6 +92,12 @@ type Plan struct {
 
 	Changes      []Change `json:"changes"`
 	ValueChanges []string `json:"valueChanges"`
+
+	// Strict plans refused what review plans only warn about (impure
+	// templates, crds/, a GitOps-managed baseline); only a strict plan can
+	// be applied.
+	Strict   bool     `json:"strict,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ChartRef pins the chart artifact.
@@ -125,14 +135,27 @@ type Change struct {
 
 // Options for MakePlan.
 type Options struct {
-	Target        Target
-	ReleaseName   string
-	Namespace     string
-	ChartPath     string
-	OverridesFile string
-	TTL           time.Duration // default 1h
-	Speculative   bool
-	Logf          func(string, ...interface{})
+	Target      Target
+	ReleaseName string
+	Namespace   string
+	// ChartPath is a local chart directory or archive. When it is not a path
+	// that exists, it is a chart name in ChartRepo (kubesense,
+	// kubesense-server, kubesensor), fetched at ChartVersion (latest if empty).
+	ChartPath    string
+	ChartRepo    string
+	ChartVersion string
+	// OverridesFile is one values file; OverridesFiles several, merged left
+	// to right like helm -f a.yaml -f b.yaml. Both may be used.
+	OverridesFile  string
+	OverridesFiles []string
+	TTL            time.Duration // default 1h
+	Speculative    bool
+	Logf           func(string, ...interface{})
+
+	// Strict refuses impure templates, crds/ and a GitOps-managed baseline
+	// instead of warning about them. Apply needs a strict plan; review (the
+	// CLI's plan command) does not.
+	Strict bool
 
 	// AllowImpureTemplates skips the pure-render lint. Spike/test only: it
 	// exists to demonstrate what the execution-boundary check catches on its own.
@@ -149,16 +172,56 @@ func loadChart(path string) (*chart.Chart, string, error) {
 	return c, d, err
 }
 
-func readOverrides(path string) (map[string]interface{}, error) {
+// readOverrides merges values files left to right, the way helm -f does.
+func readOverrides(paths ...string) (map[string]interface{}, error) {
 	vals := map[string]interface{}{}
-	if path != "" {
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
 		v, err := chartutil.ReadValuesFile(path)
 		if err != nil {
 			return nil, err
 		}
-		vals = v
+		vals = mergeMaps(vals, v)
 	}
 	return roundTrip(vals)
+}
+
+// mergeMaps is Helm's values-file merge (pkg/cli/values): maps merge
+// recursively, anything else in b replaces a.
+func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
+	out := make(map[string]interface{}, len(a))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		if bv, ok := v.(map[string]interface{}); ok {
+			if av, ok := out[k].(map[string]interface{}); ok {
+				out[k] = mergeMaps(av, bv)
+				continue
+			}
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// resolveChart returns a local path for the chart: o.ChartPath itself when it
+// exists, otherwise the chart of that name downloaded from o.ChartRepo.
+func resolveChart(o Options) (string, error) {
+	if _, err := os.Stat(o.ChartPath); err == nil {
+		return filepath.Abs(o.ChartPath)
+	}
+	if o.ChartRepo == "" {
+		return "", fmt.Errorf("chart %q: no such file or directory, and no chart repository given", o.ChartPath)
+	}
+	cpo := action.ChartPathOptions{RepoURL: o.ChartRepo, Version: o.ChartVersion}
+	path, err := cpo.LocateChart(o.ChartPath, cli.New())
+	if err != nil {
+		return "", fmt.Errorf("fetch chart %s %s from %s: %w", o.ChartPath, o.ChartVersion, o.ChartRepo, err)
+	}
+	return path, nil
 }
 
 // roundTrip normalizes values through JSON so plan-time rendering uses exactly
@@ -182,7 +245,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if o.TTL == 0 {
 		o.TTL = time.Hour
 	}
-	chartPath, err := filepath.Abs(o.ChartPath)
+	chartPath, err := resolveChart(o)
 	if err != nil {
 		return nil, err
 	}
@@ -190,10 +253,14 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	var warnings []string
 	if err := CheckNoCRDs(chrt); err != nil {
-		return nil, err
+		if o.Strict {
+			return nil, err
+		}
+		warnings = append(warnings, err.Error()+" (Helm installs crds/ on a fresh install, before anything else; they are not shown below)")
 	}
-	overrides, err := readOverrides(o.OverridesFile)
+	overrides, err := readOverrides(append([]string{o.OverridesFile}, o.OverridesFiles...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -201,7 +268,16 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if o.AllowImpureTemplates {
 		pure = "skipped"
 	} else if err := LintPureRender(chrt, overrides); err != nil {
-		return nil, err
+		if o.Strict {
+			return nil, err
+		}
+		pure = "warned"
+		var le *LintError
+		n := 0
+		if errors.As(err, &le) {
+			n = len(le.Findings)
+		}
+		warnings = append(warnings, fmt.Sprintf("the chart is not pure-render (%d template findings: lookup, random or time functions): some values, such as generated passwords and certificates, can differ between this plan and the real run", n))
 	}
 
 	readOnly := newGate(func(*release.Release) error { return errors.New("plan is read-only") })
@@ -220,7 +296,14 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		return nil, err
 	}
 	if bl.State == StateGitOps {
-		return nil, errors.New("baseline is GitOps-managed (Argo CD / Flux metadata present): use `render` for review; apply is not supported")
+		if o.Strict {
+			return nil, errors.New("baseline is GitOps-managed (Argo CD / Flux metadata present): use `render` for review; apply is not supported")
+		}
+		warnings = append(warnings, "this release is managed by Argo CD or Flux: change values in Git, not with helm; this plan is for review only")
+	}
+	clusterID, err := c.clusterID(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	rel, err := c.dryRun(o.ReleaseName, o.Namespace, bl, chrt, overrides)
@@ -235,6 +318,8 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		CreatedAt:     time.Now().UTC(),
 		Speculative:   o.Speculative,
 		ServerURL:     c.serverURL,
+		Context:       c.context,
+		ClusterID:     clusterID,
 		ReleaseName:   o.ReleaseName,
 		Namespace:     o.Namespace,
 		Action:        "install",
@@ -247,6 +332,8 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		HooksHash:     HooksHash(rel.Hooks),
 		Manifest:      rel.Manifest,
 		Hooks:         hookRecords(rel.Hooks),
+		Strict:        o.Strict,
+		Warnings:      warnings,
 	}
 	p.ExpiresAt = p.CreatedAt.Add(o.TTL)
 	if bl.State != StateFresh {
@@ -275,6 +362,19 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 			return nil, err
 		}
 	}
+	// What the diff shows: only hooks this action runs. A pre-install hook is
+	// rendered on every upgrade too, but never executed there, so listing it
+	// (often with freshly generated passwords) would be noise.
+	shownTarget, err := c.parseManifest(hookManifests(hooksFor(rel.Hooks, p.Action)), o.Namespace)
+	if err != nil {
+		return nil, err
+	}
+	var shownCurrent []renderedObject
+	if cur != nil {
+		if shownCurrent, err = c.parseManifest(hookManifests(hooksFor(cur.Hooks, p.Action)), o.Namespace); err != nil {
+			return nil, err
+		}
+	}
 	var refs []ObjectRef
 	for _, set := range [][]renderedObject{target, targetHooks, current, currentHooks} {
 		for _, r := range set {
@@ -286,9 +386,27 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		return nil, err
 	}
 
-	p.Changes = append(diffObjects(current, target, false), diffObjects(currentHooks, targetHooks, true)...)
-	p.ValueChanges = diffPaths(bl.CurrentOverrides, overrides, "", 50)
+	p.Changes = append(diffObjects(current, target, false), diffObjects(shownCurrent, shownTarget, true)...)
+	p.ValueChanges = maskValuePaths(diffPaths(bl.CurrentOverrides, overrides, "", 50))
 	return p, nil
+}
+
+// hooksFor keeps the hooks Helm runs for action ("install" or "upgrade").
+func hooksFor(hooks []*release.Hook, action string) []*release.Hook {
+	pre, post := release.HookPreInstall, release.HookPostInstall
+	if action == "upgrade" {
+		pre, post = release.HookPreUpgrade, release.HookPostUpgrade
+	}
+	var out []*release.Hook
+	for _, h := range hooks {
+		for _, e := range h.Events {
+			if e == pre || e == post {
+				out = append(out, h)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func deploymentInfoRef(ns string) ObjectRef {

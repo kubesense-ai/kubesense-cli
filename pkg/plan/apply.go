@@ -85,6 +85,9 @@ type ApplyResult struct {
 // Apply executes the plan only if the invariant holds; otherwise it returns a
 // *Refusal and nothing (no release record, no resource) has been written.
 func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
+	if !p.Strict {
+		return nil, refuse("precheck", "not-strict", "the plan was made for review, not with --strict; it cannot be applied")
+	}
 	now := time.Now
 	if o.Now != nil {
 		now = o.Now

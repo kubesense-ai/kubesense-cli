@@ -1,0 +1,5 @@
+message: hello
+dbPassword: changeme
+apiToken: ""
+deploymentInfo:
+  enabled: true

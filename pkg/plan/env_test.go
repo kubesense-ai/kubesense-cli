@@ -108,7 +108,7 @@ func run(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	testTarget = Target{Kubeconfig: kcPath, CacheDir: filepath.Join(dir, "cache")}
+	testTarget = Target{Kubeconfig: kcPath, CacheDir: filepath.Join(dir, "cache"), RequireLoopback: true}
 	return m.Run()
 }
 
