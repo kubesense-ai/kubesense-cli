@@ -1,0 +1,10 @@
+{{- $in := lookup "v1" "ConfigMap" .Release.Namespace "lookup-hook-input" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-hook-looked-up
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  value: {{ if $in }}{{ $in.data.value | quote }}{{ else }}"none"{{ end }}
