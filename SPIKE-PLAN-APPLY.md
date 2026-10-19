@@ -1,5 +1,16 @@
 # Spike: plan / show / apply on the embedded Helm SDK (v3.16.1)
 
+> **Status (2026-10-19):** `plan`, `show` and `values pull` ship (see README).
+> `apply` is not exposed: its engine and this acceptance suite stay, and a plan
+> must be made with `Strict` to be applied. What changed from the spike for
+> shipping: any cluster (kubectl's kubeconfig rules, cluster recorded by
+> `kube-system` UID; tests keep a loopback interlock), charts from
+> https://helm.kubesense.ai by name and version, repeatable `-f`, impure
+> templates / `crds/` / GitOps baselines warn instead of refusing in review
+> plans, credentials masked in output, install-only hooks hidden on upgrade, the
+> deployment-info release revision ignored as expected churn, and
+> `--detailed-exitcode`.
+
 Spec: `kube-devops/CONTROL-PLANE-DESIGN.md` §3.5 ("The invariant", "Known gaps in
 Helm v3.16.1", "Spike acceptance criterion").
 Branch: `spike/plan-apply`. Code: `pkg/plan/`, `cmd/planapply.go`.
