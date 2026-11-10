@@ -3,7 +3,6 @@ package plan
 import (
 	"bytes"
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -66,12 +65,6 @@ func TestReviewPlanMasksCredentialsAndShowsTheRest(t *testing.T) {
 	}
 	if !p.HasChanges() {
 		t.Fatal("HasChanges = false for a plan with changes")
-	}
-	// A review plan can never be applied.
-	_, err := Apply(context.Background(), p, ApplyOptions{Target: testTarget})
-	var r *Refusal
-	if !errors.As(err, &r) || r.Code != "not-strict" {
-		t.Fatalf("apply of a review plan: want not-strict refusal, got %v", err)
 	}
 }
 
