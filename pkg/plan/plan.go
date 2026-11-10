@@ -275,6 +275,9 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if overrides, err = withSuppliedValues(overrides); err != nil {
+		return nil, err
+	}
 	pure := "enforced"
 	if o.AllowImpureTemplates {
 		pure = "skipped"
@@ -405,7 +408,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	}
 
 	p.Changes = append(diffObjects(current, target, false), diffObjects(shownCurrent, shownTarget, true)...)
-	p.ValueChanges = maskValuePaths(diffPaths(bl.CurrentOverrides, overrides, "", 50))
+	p.ValueChanges = maskValuePaths(diffPaths(StripSuppliedValues(bl.CurrentOverrides), StripSuppliedValues(overrides), "", 50))
 	return p, nil
 }
 

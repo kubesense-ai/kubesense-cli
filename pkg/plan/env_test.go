@@ -188,7 +188,18 @@ func plainHelm(t *testing.T, ns string) *action.Configuration {
 	return c.helm
 }
 
+// plainInstall installs the way a kubesense apply would leave the release:
+// with the copy of the supplied values attached. rawHelmInstall does not.
 func plainInstall(t *testing.T, ns, rel, chartDir string, vals map[string]interface{}) {
+	t.Helper()
+	attached, err := withSuppliedValues(vals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawHelmInstall(t, ns, rel, chartDir, attached)
+}
+
+func rawHelmInstall(t *testing.T, ns, rel, chartDir string, vals map[string]interface{}) {
 	t.Helper()
 	ch, err := loader.Load(chartDir)
 	if err != nil {
