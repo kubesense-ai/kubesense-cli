@@ -12,7 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-func token(id, secret string) string { return base64.StdEncoding.EncodeToString([]byte(id + ":" + secret)) }
+func token(id, secret string) string {
+	return base64.StdEncoding.EncodeToString([]byte(id + ":" + secret))
+}
 
 func tokenPlan(t *testing.T, f *fixture, tok string) *Plan {
 	t.Helper()

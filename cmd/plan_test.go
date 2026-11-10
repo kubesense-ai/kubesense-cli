@@ -11,11 +11,8 @@ import (
 	"testing"
 
 	"github.com/go-logr/logr"
-	"helm.sh/helm/v3/pkg/action"
-	"helm.sh/helm/v3/pkg/chart/loader"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -104,29 +101,44 @@ func TestPlanShowValuesCommands(t *testing.T) {
 	if _, err := cs.CoreV1().ConfigMaps("kubesense").Get(context.Background(), "ks-config", metav1.GetOptions{}); err == nil {
 		t.Fatal("plan wrote to the cluster")
 	}
-	if _, err := run("apply", planFile); err == nil {
-		t.Fatal("apply must not be a command in this release")
+	for _, gone := range []string{"install", "uninstall"} {
+		if _, err := run(gone); err == nil {
+			t.Fatalf("%s must not be a command: changes go through plan and apply", gone)
+		}
 	}
 
-	// Install for real, then values pull returns exactly the overrides and a
-	// plan with them has nothing to do.
-	flags := genericclioptions.NewConfigFlags(false)
-	flags.KubeConfig = &kcPath
-	ns := "kubesense"
-	flags.Namespace = &ns
-	cfg := new(action.Configuration)
-	if err := cfg.Init(flags, ns, "secret", func(string, ...interface{}) {}); err != nil {
+	// Apply the saved plan. envtest runs no controllers, so the Deployment
+	// never becomes ready: apply succeeds and then reports it stuck (exit 3).
+	out, err = run("apply", planFile, "--yes", "--timeout", "1s")
+	if !errors.As(err, &ee) || ee.code != 3 {
+		t.Fatalf("apply: want exit 3 (applied, not ready), got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "is at revision 1") || !strings.Contains(out, "Deployment/ks") {
+		t.Fatalf("apply output:\n%s", out)
+	}
+	if _, err := cs.CoreV1().ConfigMaps("kubesense").Get(context.Background(), "ks-config", metav1.GetOptions{}); err != nil {
+		t.Fatalf("apply did not install: %v", err)
+	}
+	// The plan was used: its baseline (no release) no longer holds.
+	if out, err := run("apply", planFile, "--yes"); err == nil || !strings.Contains(err.Error(), "release-baseline") {
+		t.Fatalf("re-apply: want a release-baseline refusal, got %v\n%s", err, out)
+	}
+
+	// Another namespace: -n on plan is carried by the plan file to apply.
+	if _, err := cs.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}, metav1.CreateOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	c, err := loader.Load(chart)
-	if err != nil {
-		t.Fatal(err)
+	teamPlan := filepath.Join(dir, "team-a.plan")
+	if out, err := run("plan", "-n", "team-a", "--chart", chart, "--release", "ks", "-f", overrides, "--out", teamPlan, "--detailed-exitcode=false"); err != nil {
+		t.Fatalf("plan -n team-a: %v\n%s", err, out)
 	}
-	in := action.NewInstall(cfg)
-	in.ReleaseName, in.Namespace = "ks", ns
-	if _, err := in.Run(c, map[string]interface{}{"message": "first"}); err != nil {
-		t.Fatal(err)
+	if out, err := run("apply", teamPlan, "--yes", "--timeout", "1s"); !errors.As(err, &ee) || ee.code != 3 {
+		t.Fatalf("apply team-a: %v\n%s", err, out)
 	}
+	if _, err := cs.CoreV1().ConfigMaps("team-a").Get(context.Background(), "ks-config", metav1.GetOptions{}); err != nil {
+		t.Fatalf("apply did not install into team-a: %v", err)
+	}
+
 	pulled := filepath.Join(dir, "pulled.yaml")
 	if _, err := run("values", "pull", "--release", "ks", "-o", pulled); err != nil {
 		t.Fatal(err)

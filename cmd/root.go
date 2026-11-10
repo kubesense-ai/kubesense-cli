@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -10,7 +12,7 @@ import (
 
 var rootCmd = &cobra.Command{
 	Use:   "kubesense",
-	Short: "A customized CLI to install kubesense",
+	Short: "Plan and apply KubeSense upgrades: review every change before it reaches the cluster",
 	// plan's exit code 2 is not a usage error.
 	SilenceUsage:  true,
 	SilenceErrors: true,
@@ -33,12 +35,23 @@ func Execute() {
 	}
 }
 
+// quietLog drops Helm's chart-loader notes about the meta chart's symlinked
+// subcharts (one line per subchart, on every plan) and passes the rest on.
+type quietLog struct{}
+
+func (quietLog) Write(b []byte) (int, error) {
+	if bytes.Contains(b, []byte("found symbolic link in path")) {
+		return len(b), nil
+	}
+	return os.Stderr.Write(b)
+}
+
 func init() {
-	rootCmd.AddCommand(installCmd)
-	rootCmd.AddCommand(uninstallCmd)
+	log.SetOutput(quietLog{})
 	rootCmd.AddCommand(configureCmd)
 	rootCmd.AddCommand(planCmd)
 	rootCmd.AddCommand(showCmd)
+	rootCmd.AddCommand(applyCmd)
 	rootCmd.AddCommand(valuesCmd)
 	rootCmd.AddCommand(versionCmd)
 }
