@@ -191,10 +191,7 @@ func (p *Plan) Show(w io.Writer) {
 		fmt.Fprintf(w, Cyan("NOTE:")+" adopted release - %s will be created by this upgrade\n", DeploymentInfoSecret)
 	}
 	if len(p.ValueChanges) > 0 {
-		fmt.Fprintln(w, "\n"+Bold("Overrides:"))
-		for _, v := range p.ValueChanges {
-			fmt.Fprintf(w, "  %s\n", Yellow("~ "+v))
-		}
+		p.showOverrides(w)
 	}
 	fmt.Fprintln(w, "\n"+Bold("Resources:"))
 	add, chg, del := 0, 0, 0

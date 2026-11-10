@@ -1,8 +1,10 @@
 package plan
 
 import (
+	"bytes"
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
@@ -60,5 +62,33 @@ func TestFirstPlanAfterRawHelmAttachesCopy(t *testing.T) {
 	}
 	if again := reviewPlan(t, f, "message: same\n"); again.HasChanges() {
 		t.Fatalf("after one apply the same values must plan no changes:\n%s", shown(again))
+	}
+}
+
+func TestShowOverridesGroupsAndKeepsLongValues(t *testing.T) {
+	long := "http://kubesense-datastore-shard0-0.kubesense-datastore-headless.prod.svc.cluster.local:8123"
+	p := &Plan{
+		Baseline: Baseline{CurrentOverrides: map[string]interface{}{
+			"api":        map[string]interface{}{"image": map[string]interface{}{"tag": "1.0"}},
+			"aggregator": map[string]interface{}{"endpoint": "http://old", "route": map[string]interface{}{"a": "b"}},
+		}},
+		Overrides: map[string]interface{}{
+			"api":        map[string]interface{}{"image": map[string]interface{}{"tag": "1.1"}},
+			"aggregator": map[string]interface{}{"endpoint": long, "routes": []interface{}{map[string]interface{}{"name": "x"}}},
+		},
+	}
+	var b bytes.Buffer
+	p.showOverrides(&b)
+	out := b.String()
+	for _, want := range []string{
+		"  aggregator\n",
+		"    ~ endpoint\n        - http://old\n        + " + long + "\n", // whole, never cut
+		"    - route\n        - a: b\n",                                  // removed map as YAML
+		"    + routes\n        + - name: x\n",                            // added list as YAML
+		"  api\n    ~ image.tag  1.0 → 1.1\n",                            // short change inline
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
 	}
 }

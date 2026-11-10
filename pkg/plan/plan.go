@@ -291,7 +291,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		if errors.As(err, &le) {
 			n = len(le.Findings)
 		}
-		warnings = append(warnings, fmt.Sprintf("the chart is not pure-render (%d template findings: lookup, random or time functions): some values, such as generated passwords and certificates, can differ between this plan and the real run", n))
+		warnings = append(warnings, fmt.Sprintf("the chart generates passwords and certificates or reads the cluster (%d places), so apply checks this plan's inputs, not its exact render", n))
 	}
 
 	readOnly := newGate(func(*release.Release) error { return errors.New("plan is read-only") })
