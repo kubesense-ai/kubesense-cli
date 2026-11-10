@@ -83,7 +83,7 @@ func TestShowOverridesGroupsAndKeepsLongValues(t *testing.T) {
 	for _, want := range []string{
 		"  aggregator\n",
 		"    ~ endpoint\n        - http://old\n        + " + long + "\n", // whole, never cut
-		"    - route\n        - a: b\n",                                  // removed map as YAML
+		"    - route.a  b (removed)\n",                                   // a removed map, setting by setting
 		"    + routes\n        + - name: x\n",                            // added list as YAML
 		"  api\n    ~ image.tag  1.0 → 1.1\n",                            // short change inline
 	} {

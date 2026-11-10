@@ -28,6 +28,14 @@ func overrideChanges(before, after map[string]interface{}) []overrideChange {
 	walk = func(a, b interface{}, path []string) {
 		am, aok := a.(map[string]interface{})
 		bm, bok := b.(map[string]interface{})
+		// A map added or removed whole is walked too, so each of its
+		// settings is listed by its full path (api.image.tag, not "api").
+		if aok && b == nil && len(am) > 0 {
+			bm, bok = map[string]interface{}{}, true
+		}
+		if bok && a == nil && len(bm) > 0 {
+			am, aok = map[string]interface{}{}, true
+		}
 		if aok && bok {
 			keys := map[string]bool{}
 			for k := range am {
