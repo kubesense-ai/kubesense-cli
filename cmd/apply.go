@@ -54,19 +54,19 @@ Example:
 		}
 		target := plan.Target{Kubeconfig: applyKubeconfig, Context: ctxName}
 
-		fmt.Printf("Plan %s, made %s:\n", args[0], p.CreatedAt.Local().Format("2 Jan 15:04"))
-		fmt.Printf("  %s release %s in namespace %s on %s\n", p.Action, p.ReleaseName, p.Namespace, clusterLabel(p))
+		fmt.Printf("%s %s, made %s:\n", plan.Bold("Plan"), args[0], p.CreatedAt.Local().Format("2 Jan 15:04"))
+		fmt.Printf("  %s release %s in namespace %s on %s\n", p.Action, plan.Bold(p.ReleaseName), plan.Bold(p.Namespace), clusterLabel(p))
 		fmt.Printf("  chart %s-%s, %d resource changes, %d values changes\n", p.Chart.Name, p.Chart.Version, len(p.Changes), len(p.ValueChanges))
 		if s := p.AccessToken; s != nil && s.Action != "unchanged" {
 			verb := map[string]string{"install": "install", "upgrade": "rotate"}[s.Action]
-			fmt.Printf("  first: %s the access token (key %s)\n", verb, plan.MaskKeyID(s.KeyID()))
+			fmt.Printf("  first: %s\n", plan.Yellow(fmt.Sprintf("%s the access token (key %s)", verb, plan.MaskKeyID(s.KeyID()))))
 		}
 		if !p.HasChanges() {
 			fmt.Println("The plan has no changes; nothing to apply.")
 			return nil
 		}
 		if !applyYes {
-			fmt.Printf("\nType the namespace (%s) to apply: ", p.Namespace)
+			fmt.Printf("\nType the namespace (%s) to apply: ", plan.Bold(p.Namespace))
 			line, _ := bufio.NewReader(os.Stdin).ReadString('\n')
 			if strings.TrimSpace(line) != p.Namespace {
 				return errors.New("not applied: the namespace did not match")
@@ -74,7 +74,7 @@ Example:
 		}
 
 		ctx := context.Background()
-		res, err := plan.Apply(ctx, p, plan.ApplyOptions{Target: target})
+		res, err := plan.Apply(ctx, p, plan.ApplyOptions{Target: target, Logf: debugf()})
 		if err != nil {
 			var r *plan.Refusal
 			if errors.As(err, &r) {
@@ -83,35 +83,35 @@ Example:
 			return err
 		}
 		if res.AccessToken != "" {
-			fmt.Printf("\nApplied: %s.\n", res.AccessToken)
+			fmt.Printf("\n%s %s.\n", plan.Green("Applied:"), res.AccessToken)
 		}
 		if res.Action == "none" {
 			fmt.Printf("Release %s unchanged at revision %d.\n", p.ReleaseName, res.Revision)
 			return nil
 		}
-		fmt.Printf("\nApplied: release %s is at revision %d (%s).\n", p.ReleaseName, res.Revision, res.Status)
+		fmt.Printf("\n%s release %s is at revision %d (%s).\n", plan.Green("Applied:"), p.ReleaseName, res.Revision, res.Status)
 
 		fmt.Printf("Waiting up to %s for the workloads to roll out:\n", applyTimeout)
 		out, err := plan.WatchRollout(ctx, target, p.Namespace, p.ReleaseName, applyTimeout, func(w plan.WorkloadStatus) {
-			mark := "…"
+			line := plan.Dim("… " + w.String())
 			if w.Done() {
-				mark = "✓"
+				line = plan.Green("✓") + " " + w.String()
 			} else if w.Problem != "" {
-				mark = "!"
+				line = plan.Red("! " + w.String())
 			}
-			fmt.Printf("  %s %s\n", mark, w)
+			fmt.Printf("  %s\n", line)
 		})
 		if err != nil {
 			return err
 		}
 		if stuck := out.NotReady(); len(stuck) > 0 {
-			fmt.Printf("\nThe upgrade was applied, but %d workload(s) are not ready after %s:\n", len(stuck), applyTimeout)
+			fmt.Printf("\n%s\n", plan.Yellow(fmt.Sprintf("The upgrade was applied, but %d workload(s) are not ready after %s:", len(stuck), applyTimeout)))
 			for _, w := range stuck {
-				fmt.Printf("  %s\n", w)
+				fmt.Printf("  %s\n", plan.Red(w.String()))
 			}
 			return &exitError{code: 3}
 		}
-		fmt.Printf("\nAll %d workloads are ready.\n", len(out.Workloads))
+		fmt.Printf("\n%s\n", plan.Green(fmt.Sprintf("All %d workloads are ready.", len(out.Workloads))))
 		return nil
 	},
 }

@@ -190,18 +190,18 @@ func (p *Plan) showAccessToken(w io.Writer) {
 	s := p.AccessToken
 	switch {
 	case s != nil && s.Action == "install":
-		fmt.Fprintf(w, "Access:   + install access token, key %s (release %s)\n", MaskKeyID(s.KeyID()), AccessTokenRelease)
+		fmt.Fprintf(w, "%s %s\n", Bold("Access:  "), Green(fmt.Sprintf("+ install access token, key %s (release %s)", MaskKeyID(s.KeyID()), AccessTokenRelease)))
 	case s != nil && s.Action == "upgrade" && st.KeyID != s.KeyID():
-		fmt.Fprintf(w, "Access:   ~ rotate access token, key %s -> %s\n", MaskKeyID(st.KeyID), MaskKeyID(s.KeyID()))
+		fmt.Fprintf(w, "%s %s\n", Bold("Access:  "), Yellow(fmt.Sprintf("~ rotate access token, key %s -> %s", MaskKeyID(st.KeyID), MaskKeyID(s.KeyID()))))
 	case s != nil && s.Action == "upgrade":
-		fmt.Fprintf(w, "Access:   ~ replace access token secret, key %s\n", MaskKeyID(s.KeyID()))
+		fmt.Fprintf(w, "%s %s\n", Bold("Access:  "), Yellow(fmt.Sprintf("~ replace access token secret, key %s", MaskKeyID(s.KeyID()))))
 	case st.Installed:
 		when := ""
 		if !st.Deployed.IsZero() {
 			when = ", set " + st.Deployed.Format("2 Jan 2006")
 		}
-		fmt.Fprintf(w, "Access:   access token present, key %s%s; unchanged\n", MaskKeyID(st.KeyID), when)
+		fmt.Fprintf(w, Bold("Access:  ")+" access token present, key %s%s; unchanged\n", MaskKeyID(st.KeyID), when)
 	default:
-		fmt.Fprintf(w, "Access:   no access token installed: fine when images come from your own registry; add one with --access-token-file\n")
+		fmt.Fprintf(w, Bold("Access:  ")+" no access token installed: fine when images come from your own registry; add one with --access-token-file\n")
 	}
 }

@@ -172,40 +172,40 @@ func (p *Plan) Show(w io.Writer) {
 	if p.Context != "" {
 		cluster = fmt.Sprintf("%s (%s)", p.Context, p.ServerURL)
 	}
-	fmt.Fprintf(w, "Cluster:  %s\n", cluster)
+	fmt.Fprintf(w, Bold("Cluster:")+"  %s\n", cluster)
 	if p.ClusterID != "" {
 		fmt.Fprintf(w, "          cluster ID %s (kube-system UID)\n", p.ClusterID)
 	}
-	fmt.Fprintf(w, "Target:   namespace %s, release %s (%s)\n", p.Namespace, p.ReleaseName, p.Action)
-	fmt.Fprintf(w, "Baseline: %s, %s\n", p.Baseline.State, rev)
-	fmt.Fprintf(w, "Chart:    %s-%s  %s\n", p.Chart.Name, p.Chart.Version, shortHash(p.Chart.Digest))
-	fmt.Fprintf(w, "Render:   kube %s, %d API versions; manifests %s, hooks %s; pure-render lint %s\n",
+	fmt.Fprintf(w, Bold("Target:")+"   namespace %s, release %s (%s)\n", p.Namespace, p.ReleaseName, p.Action)
+	fmt.Fprintf(w, Bold("Baseline:")+" %s, %s\n", p.Baseline.State, rev)
+	fmt.Fprintf(w, Bold("Chart:")+"    %s-%s  %s\n", p.Chart.Name, p.Chart.Version, shortHash(p.Chart.Digest))
+	fmt.Fprintf(w, Bold("Render:")+"   kube %s, %d API versions; manifests %s, hooks %s; pure-render lint %s\n",
 		p.Capabilities.KubeVersion, p.Capabilities.APICount, shortHash(p.ManifestHash), shortHash(p.HooksHash), p.PureRender)
-	fmt.Fprintf(w, "Created:  %s by kubesense %s (Helm %s); expires %s\n",
+	fmt.Fprintf(w, Bold("Created:")+"  %s by kubesense %s (Helm %s); expires %s\n",
 		p.CreatedAt.Format(time.RFC3339), p.CLIVersion, p.HelmVersion, p.ExpiresAt.Format(time.RFC3339))
 	p.showAccessToken(w)
 	for _, wn := range p.Warnings {
-		fmt.Fprintf(w, "WARNING:  %s\n", wn)
+		fmt.Fprintf(w, "%s  %s\n", Yellow("WARNING:"), Yellow(wn))
 	}
 	if p.Baseline.State == StateAdopted {
-		fmt.Fprintf(w, "NOTE: adopted release - %s will be created by this upgrade\n", DeploymentInfoSecret)
+		fmt.Fprintf(w, Cyan("NOTE:")+" adopted release - %s will be created by this upgrade\n", DeploymentInfoSecret)
 	}
 	if len(p.ValueChanges) > 0 {
-		fmt.Fprintln(w, "\nOverrides:")
+		fmt.Fprintln(w, "\n"+Bold("Overrides:"))
 		for _, v := range p.ValueChanges {
-			fmt.Fprintf(w, "  ~ %s\n", v)
+			fmt.Fprintf(w, "  %s\n", Yellow("~ "+v))
 		}
 	}
-	fmt.Fprintln(w, "\nResources:")
+	fmt.Fprintln(w, "\n"+Bold("Resources:"))
 	add, chg, del := 0, 0, 0
 	for _, c := range p.Changes {
 		tag := ""
 		if c.Hook {
 			tag = " [hook]"
 		}
-		fmt.Fprintf(w, "  %s %s%s\n", c.Op, c.Ref.Short(), tag)
+		fmt.Fprintf(w, "  %s%s\n", opColor(c.Op, c.Op+" "+c.Ref.Short()), Dim(tag))
 		for _, d := range c.Details {
-			fmt.Fprintf(w, "        %s\n", d)
+			fmt.Fprintf(w, "        %s\n", Dim(d))
 		}
 		switch c.Op {
 		case "+":
@@ -217,11 +217,11 @@ func (p *Plan) Show(w io.Writer) {
 		}
 	}
 	if len(p.Changes) == 0 {
-		fmt.Fprintln(w, "  (no changes)")
+		fmt.Fprintln(w, Dim("  (no changes)"))
 	}
-	fmt.Fprintf(w, "\nPlan: %d to add, %d to change, %d to destroy.\n", add, chg, del)
+	fmt.Fprintf(w, "\n%s %s, %s, %s.\n", Bold("Plan:"), Green(fmt.Sprintf("%d to add", add)), Yellow(fmt.Sprintf("%d to change", chg)), Red(fmt.Sprintf("%d to destroy", del)))
 	if p.hasMasked() {
-		fmt.Fprintln(w, "Values marked (sensitive value changed) are hidden here; a saved plan file holds the overrides and is readable only by you.")
+		fmt.Fprintln(w, Dim("Values marked (sensitive value changed) are hidden here; a saved plan file holds the overrides and is readable only by you."))
 	}
 }
 

@@ -62,6 +62,7 @@ Examples:
 			TTL:            planTTL,
 			Speculative:    planOut == "",
 			Strict:         planStrict,
+			Logf:           debugf(),
 			AccessToken:    token, AccessTokenChart: planAccessTokenChart,
 		})
 		if err != nil {
