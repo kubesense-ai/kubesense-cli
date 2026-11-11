@@ -190,3 +190,26 @@ func TestPreflightValuesStorageClass(t *testing.T) {
 		t.Error("no default class should only warn when the values name a class")
 	}
 }
+
+func TestDiskEncryption(t *testing.T) {
+	sc := func(prov string, params map[string]string) storagev1.StorageClass {
+		return storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "c"}, Provisioner: prov, Parameters: params}
+	}
+	for _, tc := range []struct {
+		sc   storagev1.StorageClass
+		want Level
+		has  string
+	}{
+		{sc("ebs.csi.aws.com", map[string]string{"type": "gp3"}), Warn, "unencrypted"},
+		{sc("ebs.csi.aws.com", map[string]string{"encrypted": "true"}), Pass, "aws/ebs"},
+		{sc("ebs.csi.aws.com", map[string]string{"encrypted": "true", "kmsKeyId": "arn:k"}), Pass, "arn:k"},
+		{sc("disk.csi.azure.com", nil), Pass, "platform-managed"},
+		{sc("pd.csi.storage.gke.io", nil), Pass, "Google-managed"},
+		{sc("rancher.io/local-path", nil), Info, "cannot tell"},
+	} {
+		l, d, _ := diskEncryption(tc.sc)
+		if l != tc.want || !strings.Contains(d, tc.has) {
+			t.Errorf("%s %v: %s %q", tc.sc.Provisioner, tc.sc.Parameters, l, d)
+		}
+	}
+}

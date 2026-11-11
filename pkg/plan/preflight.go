@@ -11,6 +11,7 @@ import (
 
 	authv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -382,8 +383,10 @@ func checkStorage(ctx context.Context, e preflightEnv, refs map[string][]string,
 	}
 	// The classes your values name must exist, and their CSI driver too.
 	byName := map[string]string{}
+	classes := map[string]storagev1.StorageClass{}
 	for _, sc := range scs.Items {
 		byName[sc.Name] = sc.Provisioner
+		classes[sc.Name] = sc
 	}
 	var names []string
 	for n := range refs {
@@ -403,7 +406,60 @@ func checkStorage(ctx context.Context, e preflightEnv, refs map[string][]string,
 			add("Storage", "StorageClass "+n, Pass, fmt.Sprintf("%s, used by %s", prov, where), "")
 		}
 	}
+	// Encryption at rest, for the classes KubeSense's volumes will use: the
+	// ones your values name, else the default.
+	check := map[string]bool{}
+	for n := range refs {
+		check[n] = true
+	}
+	if len(refs) == 0 {
+		for _, n := range def {
+			check[n] = true
+		}
+	}
+	var enc []string
+	for n := range check {
+		if _, ok := classes[n]; ok {
+			enc = append(enc, n)
+		}
+	}
+	sort.Strings(enc)
+	for _, n := range enc {
+		l, d, fix := diskEncryption(classes[n])
+		add("Storage", "Encryption "+n, l, d, fix)
+	}
 	return drivers, nil
+}
+
+// diskEncryption reads whether a class's disks are encrypted at rest. What
+// the cluster cannot see (AWS account-level EBS encryption by default) is
+// said, not guessed.
+func diskEncryption(sc storagev1.StorageClass) (Level, string, string) {
+	p := sc.Parameters
+	switch prov := sc.Provisioner; prov {
+	case "ebs.csi.aws.com", "kubernetes.io/aws-ebs":
+		if strings.EqualFold(p["encrypted"], "true") {
+			key := "AWS-managed key (aws/ebs)"
+			if k := p["kmsKeyId"]; k != "" {
+				key = "KMS key " + k
+			}
+			return Pass, "EBS volumes encrypted with " + key, ""
+		}
+		return Warn, "class does not set encrypted: \"true\"; EBS volumes are unencrypted unless the account has EBS encryption by default turned on",
+			"add parameters.encrypted: \"true\" (and kmsKeyId for your own key) to StorageClass " + sc.Name + ", or check: aws ec2 get-ebs-encryption-by-default"
+	case "pd.csi.storage.gke.io", "kubernetes.io/gce-pd":
+		if k := p["disk-encryption-kms-key"]; k != "" {
+			return Pass, "Persistent Disks encrypted with your Cloud KMS key " + k, ""
+		}
+		return Pass, "Persistent Disks are always encrypted at rest (Google-managed key)", ""
+	case "disk.csi.azure.com", "kubernetes.io/azure-disk":
+		if id := p["diskEncryptionSetID"]; id != "" {
+			return Pass, "Azure Disks encrypted with your key (disk encryption set)", ""
+		}
+		return Pass, "Azure Disks are always encrypted at rest (platform-managed key)", ""
+	default:
+		return Info, "cannot tell whether " + prov + " encrypts disks at rest", "check with your storage provider"
+	}
 }
 
 // storageClassRefs finds every storageClass / storageClassName your values
