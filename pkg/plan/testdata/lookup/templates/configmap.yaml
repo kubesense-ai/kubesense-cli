@@ -1,0 +1,7 @@
+{{- $in := lookup "v1" "ConfigMap" .Release.Namespace "lookup-input" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-looked-up
+data:
+  value: {{ if $in }}{{ $in.data.value | quote }}{{ else }}"none"{{ end }}

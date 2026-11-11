@@ -1,0 +1,11 @@
+{{- if .Values.deploymentInfo.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kubesense-deployment-info
+type: Opaque
+stringData:
+  chartVersion: {{ .Chart.Version | quote }}
+  values.yaml: |
+{{ toYaml .Values | indent 4 }}
+{{- end }}

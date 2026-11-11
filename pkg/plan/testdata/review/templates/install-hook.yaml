@@ -1,0 +1,11 @@
+# Runs on install only, and renders differently every time, like the real
+# chart's generated-password hook. An upgrade plan must not list it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-install-only
+  annotations:
+    "helm.sh/hook": pre-install
+    "helm.sh/hook-delete-policy": before-hook-creation
+data:
+  generated: {{ randAlphaNum 12 | quote }}

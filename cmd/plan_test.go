@@ -1,0 +1,180 @@
+package cmd
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"testing"
+
+	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/clientcmd"
+	"sigs.k8s.io/controller-runtime/pkg/envtest"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/yaml"
+)
+
+// End-to-end test of the cobra commands against a private envtest API server.
+// KUBECONFIG points at it, so even the default-kubeconfig path cannot reach a
+// real cluster.
+func TestPlanShowValuesCommands(t *testing.T) {
+	assets := os.Getenv("KUBEBUILDER_ASSETS")
+	if assets == "" {
+		home, _ := os.UserHomeDir()
+		m, _ := filepath.Glob(filepath.Join(home, "Library", "Application Support", "io.kubebuilder.envtest", "k8s", "*"))
+		m2, _ := filepath.Glob(filepath.Join(home, ".local", "share", "kubebuilder-envtest", "k8s", "*"))
+		m = append(m, m2...)
+		sort.Strings(m)
+		if len(m) == 0 {
+			t.Fatal("envtest binaries not found; see pkg/plan/env_test.go")
+		}
+		assets = m[len(m)-1]
+	}
+	ctrllog.SetLogger(logr.Discard())
+	env := &envtest.Environment{BinaryAssetsDirectory: assets}
+	if _, err := env.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer env.Stop()
+	user, err := env.AddUser(envtest.User{Name: "smoke", Groups: []string{"system:masters"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kc, _ := user.KubeConfig()
+	dir := t.TempDir()
+	kcPath := filepath.Join(dir, "kubeconfig")
+	if err := os.WriteFile(kcPath, kc, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", kcPath)
+	t.Setenv("HELM_CACHE_HOME", filepath.Join(dir, "helm-cache"))
+	rc, _ := clientcmd.RESTConfigFromKubeConfig(kc)
+	if !strings.Contains(rc.Host, "127.0.0.1") {
+		t.Fatalf("refusing: envtest server %s is not loopback", rc.Host)
+	}
+	cs := kubernetes.NewForConfigOrDie(rc)
+	if _, err := cs.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kubesense"}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+
+	chart, _ := filepath.Abs("../pkg/plan/testdata/app")
+	overrides := filepath.Join(dir, "overrides.yaml")
+	if err := os.WriteFile(overrides, []byte("message: first\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run := func(args ...string) (string, error) {
+		t.Helper()
+		r, w, _ := os.Pipe()
+		stdout := os.Stdout
+		os.Stdout = w
+		rootCmd.SetArgs(args)
+		err := rootCmd.Execute()
+		w.Close()
+		os.Stdout = stdout
+		out, _ := io.ReadAll(r)
+		return string(out), err
+	}
+
+	// Fresh install: a change, so --detailed-exitcode exits 2. Uses the
+	// default kubeconfig ($KUBECONFIG -> envtest), as a customer would.
+	planFile := filepath.Join(dir, "first.plan")
+	out, err := run("plan", "--chart", chart, "--release", "ks", "-f", overrides, "--out", planFile, "--detailed-exitcode")
+	var ee *exitError
+	if !errors.As(err, &ee) || ee.code != 2 {
+		t.Fatalf("plan --detailed-exitcode on a fresh install: want exit 2, got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "no release -> revision 1") || !strings.Contains(out, "+ ConfigMap/ks-config") {
+		t.Fatalf("plan output:\n%s", out)
+	}
+	if fi, err := os.Stat(planFile); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("plan file must be written 0600: %v %v", fi, err)
+	}
+	if out, err := run("show", planFile); err != nil || !strings.Contains(out, "+ ConfigMap/ks-config") {
+		t.Fatalf("show: %v\n%s", err, out)
+	}
+	if _, err := cs.CoreV1().ConfigMaps("kubesense").Get(context.Background(), "ks-config", metav1.GetOptions{}); err == nil {
+		t.Fatal("plan wrote to the cluster")
+	}
+	// --debug prints the CLI's steps and Helm's log, on stderr only.
+	{
+		r, w, _ := os.Pipe()
+		stderr := os.Stderr
+		os.Stderr = w
+		out, err := run("plan", "--chart", chart, "--release", "ks", "-f", overrides, "--debug")
+		w.Close()
+		os.Stderr = stderr
+		debug = false // cobra keeps flag values between Execute calls
+		logs, _ := io.ReadAll(r)
+		var ee *exitError
+		if err != nil && !errors.As(err, &ee) {
+			t.Fatalf("plan --debug: %v", err)
+		}
+		for _, want := range []string{"[step", "loaded chart app-", "release ks: fresh", "rendering with Helm", "recorded the live state"} {
+			if !strings.Contains(string(logs), want) {
+				t.Fatalf("--debug output lacks %q:\n%s", want, logs)
+			}
+		}
+		if strings.Contains(out, "[step") {
+			t.Fatal("debug lines must go to stderr, not stdout")
+		}
+	}
+	for _, gone := range []string{"install", "uninstall"} {
+		if _, err := run(gone); err == nil {
+			t.Fatalf("%s must not be a command: changes go through plan and apply", gone)
+		}
+	}
+
+	// Apply the saved plan. envtest runs no controllers, so the Deployment
+	// never becomes ready: apply succeeds and then reports it stuck (exit 3).
+	out, err = run("apply", planFile, "--yes", "--timeout", "1s")
+	if !errors.As(err, &ee) || ee.code != 3 {
+		t.Fatalf("apply: want exit 3 (applied, not ready), got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "is at revision 1") || !strings.Contains(out, "Deployment/ks") {
+		t.Fatalf("apply output:\n%s", out)
+	}
+	if _, err := cs.CoreV1().ConfigMaps("kubesense").Get(context.Background(), "ks-config", metav1.GetOptions{}); err != nil {
+		t.Fatalf("apply did not install: %v", err)
+	}
+	// The plan was used: its baseline (no release) no longer holds.
+	if out, err := run("apply", planFile, "--yes"); err == nil || !strings.Contains(err.Error(), "release-baseline") {
+		t.Fatalf("re-apply: want a release-baseline refusal, got %v\n%s", err, out)
+	}
+
+	// Another namespace: -n on plan is carried by the plan file to apply.
+	if _, err := cs.CoreV1().Namespaces().Create(context.Background(), &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "team-a"}}, metav1.CreateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	teamPlan := filepath.Join(dir, "team-a.plan")
+	if out, err := run("plan", "-n", "team-a", "--chart", chart, "--release", "ks", "-f", overrides, "--out", teamPlan, "--detailed-exitcode=false"); err != nil {
+		t.Fatalf("plan -n team-a: %v\n%s", err, out)
+	}
+	if out, err := run("apply", teamPlan, "--yes", "--timeout", "1s"); !errors.As(err, &ee) || ee.code != 3 {
+		t.Fatalf("apply team-a: %v\n%s", err, out)
+	}
+	if _, err := cs.CoreV1().ConfigMaps("team-a").Get(context.Background(), "ks-config", metav1.GetOptions{}); err != nil {
+		t.Fatalf("apply did not install into team-a: %v", err)
+	}
+
+	pulled := filepath.Join(dir, "pulled.yaml")
+	if _, err := run("values", "pull", "--release", "ks", "-o", pulled); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(pulled)
+	var got map[string]interface{}
+	if err := yaml.Unmarshal(b, &got); err != nil || len(got) != 1 || got["message"] != "first" {
+		t.Fatalf("values pull wrote %q (%v)", b, err)
+	}
+	if fi, _ := os.Stat(pulled); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("values file mode %v, want 0600", fi.Mode().Perm())
+	}
+	if out, err := run("plan", "--chart", chart, "--release", "ks", "-f", pulled, "--detailed-exitcode"); err != nil {
+		t.Fatalf("plan from pulled values: want no changes (exit 0), got %v\n%s", err, out)
+	}
+}

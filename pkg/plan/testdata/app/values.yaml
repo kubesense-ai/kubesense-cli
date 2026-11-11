@@ -1,0 +1,6 @@
+message: hello
+imageTag: "1.36"
+replicas: 1
+hookMessage: pre
+deploymentInfo:
+  enabled: true

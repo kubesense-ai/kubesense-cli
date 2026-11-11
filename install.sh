@@ -8,7 +8,7 @@ cat << 'BANNER'
 ██║░╚██╗╚██████╔╝██████╦╝███████╗██████╔╝███████╗██║░╚███║██████╔╝███████╗
 ╚═╝░░╚═╝░╚═════╝░╚═════╝░╚══════╝╚═════╝░╚══════╝╚═╝░░╚══╝╚═════╝░╚══════╝   
 
-Start using kubesense by running: kubesense install
+Get started: kubesense configure, then kubesense plan and kubesense apply
 BANNER
 }
 # Check OS and architecture

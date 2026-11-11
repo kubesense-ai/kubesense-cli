@@ -1,0 +1,4 @@
+apiVersion: v2
+name: lookup
+version: 0.1.0
+description: Spike fixture - a manifest and a hook whose content depends on lookup().
