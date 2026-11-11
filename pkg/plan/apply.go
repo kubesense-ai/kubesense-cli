@@ -115,6 +115,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if p.CLIVersion != Version {
 		return nil, refuse(StagePrecheck, RefuseCLIVersion, "plan made by kubesense %s, this is %s", p.CLIVersion, Version)
 	}
+	stepf("plan %s: made %s by kubesense %s, expires %s", p.Action, p.CreatedAt.Local().Format("15:04:05"), p.CLIVersion, p.ExpiresAt.Local().Format("15:04:05"))
 	if p.HelmVersion != HelmVersion() {
 		return nil, refuse(StagePrecheck, RefuseHelmVersion, "plan rendered with Helm %s, embedded Helm is %s", p.HelmVersion, HelmVersion())
 	}
@@ -130,6 +131,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if digest != p.Chart.Digest && !o.skipDigestCheck {
 		return nil, refuse(StagePrecheck, RefuseChartDigest, "chart digest %s != planned %s", shortHash(digest), shortHash(p.Chart.Digest))
 	}
+	stepf("chart %s-%s digest %s matches the plan", p.Chart.Name, p.Chart.Version, shortHash(digest))
 	if p.Baseline.State == StateGitOps {
 		return nil, refuse(StagePrecheck, RefuseGitOps, "the release is managed by Argo CD or Flux: change its values in Git")
 	}
@@ -168,6 +170,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 		if id != p.ClusterID {
 			return nil, refuse(StagePrecheck, RefuseTarget, "plan was made against cluster %s, this is cluster %s", p.ClusterID, id)
 		}
+		stepf("cluster ID %s matches the plan", id)
 	}
 
 	// 2. Render inputs: fetch Capabilities, compare, then PIN them so the real
@@ -182,6 +185,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 			caps.KubeVersion.Version, len(caps.APIVersions), p.Capabilities.KubeVersion, p.Capabilities.APICount)
 	}
 	c.helm.Capabilities = caps
+	stepf("cluster APIs unchanged since plan (kube %s, %d API versions)", caps.KubeVersion.Version, len(caps.APIVersions))
 
 	// 3 + 4. Baselines (early, cheap refusal; repeated at the boundary).
 	if err := c.checkBaselines(ctx, p, StagePrecheck); err != nil {
@@ -206,6 +210,10 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if !p.HasReleaseChanges() && nfsNote == "" {
 		return &ApplyResult{Action: "none", Revision: p.Baseline.Revision, Status: p.Baseline.Status, AccessToken: tokenNote}, nil
 	}
+
+	stepf("running Helm %s of %s (hooks and migrations wait up to %s)", p.Action, p.ReleaseName, o.timeout())
+	stopWatch := watchHooks(ctx, c, p.Namespace)
+	defer stopWatch()
 
 	// 5. Execute. The post-renderer checks the non-hook manifests inside the
 	// real render; the gate checks manifests + hooks + baselines at the first
@@ -284,6 +292,7 @@ func (c *conn) checkBaselines(ctx context.Context, p *Plan, stage string) error 
 	if bl.DeploymentInfoHash != p.Baseline.DeploymentInfoHash {
 		return refuse(stage, RefuseDeploymentInfo, "%s changed since plan", DeploymentInfoSecret)
 	}
+	stepf("%s: release %s still at revision %d %s, as planned", stage, p.ReleaseName, bl.Revision, bl.Status)
 	if _, err := c.recheckLive(ctx, p.LiveObjects); err != nil {
 		var lb *LiveBaselineError
 		if errors.As(err, &lb) {

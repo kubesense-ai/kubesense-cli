@@ -176,6 +176,7 @@ func applyNFS(ctx context.Context, p *Plan, t Target, overrides map[string]inter
 	if err != nil {
 		return "", err
 	}
+	stepf("NFS: installing release %s from %s-%s", NFSRelease, s.Chart.Name, s.Chart.Version)
 	if st.Revision != s.BaselineRevision {
 		return "", refuse(StagePrecheck, RefuseNFS, "release %s is at revision %d, planned from %d", NFSRelease, st.Revision, s.BaselineRevision)
 	}
@@ -195,6 +196,7 @@ func applyNFS(ctx context.Context, p *Plan, t Target, overrides map[string]inter
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", NFSRelease, err)
 	}
+	stepf("NFS: waiting for Service %s to get a ClusterIP", NFSService)
 	var host string
 	for i := 0; i < 30 && host == ""; i++ {
 		if st, err = c.nfsState(ctx, p.Namespace); err == nil {
@@ -213,6 +215,7 @@ func applyNFS(ctx context.Context, p *Plan, t Target, overrides map[string]inter
 	}
 	for _, path := range s.Paths {
 		setPath(overrides, strings.Split(path, "."), host)
+		stepf("NFS: set %s = %s", path, host)
 	}
 	return fmt.Sprintf("NFS server installed, release %s revision %d, at %s (set in %d value(s))", NFSRelease, rel.Version, host, len(s.Paths)), nil
 }

@@ -157,6 +157,7 @@ func (c *conn) liveBaseline(ctx context.Context, refs []ObjectRef) ([]LiveObject
 		out = append(out, LiveObject{Ref: r, Hash: h})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Ref.key() < out[j].Ref.key() })
+	stepf("recorded the live state of %d object(s) for apply to recheck", len(out))
 	return out, nil
 }
 
@@ -186,7 +187,9 @@ func (c *conn) recheckLive(ctx context.Context, want []LiveObject) (int, error) 
 		}
 	}
 	if len(changed) > 0 {
+		stepf("live objects: %d checked, %d changed since plan", n, len(changed))
 		return n, &LiveBaselineError{Changed: changed}
 	}
+	stepf("live objects: %d checked, unchanged since plan", n)
 	return n, nil
 }

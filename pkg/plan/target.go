@@ -93,8 +93,12 @@ func (t Target) connect(namespace string, gate *Gate, logf func(string, ...inter
 		return nil, err
 	}
 	if logf == nil {
+		logf = HelmLog()
+	}
+	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
+	stepf("connected to %s (%s), namespace %s", contextName, rc.Host, namespace)
 	cfg := new(action.Configuration)
 	if err := cfg.Init(flags, namespace, "secret", logf); err != nil {
 		return nil, err

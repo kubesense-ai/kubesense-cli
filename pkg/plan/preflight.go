@@ -104,6 +104,7 @@ func RunPreflight(ctx context.Context, t Target, namespace string, values map[st
 func preflight(ctx context.Context, e preflightEnv, ns string, values map[string]interface{}) (*PreflightReport, error) {
 	r := &PreflightReport{Namespace: ns}
 	add := func(group, name string, l Level, detail, fix string) {
+		stepf("preflight %s / %s: %s", group, name, l)
 		r.Checks = append(r.Checks, Check{Group: group, Name: name, Level: l, Detail: detail, Fix: fix})
 	}
 

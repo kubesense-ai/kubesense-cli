@@ -235,9 +235,11 @@ func resolveChart(o Options) (string, error) {
 	// directory next to charts/) is not one: a bare name then goes to the repo.
 	if fi, err := os.Stat(o.ChartPath); err == nil {
 		if !fi.IsDir() {
+			stepf("chart %s: local archive", o.ChartPath)
 			return filepath.Abs(o.ChartPath)
 		}
 		if _, err := os.Stat(filepath.Join(o.ChartPath, "Chart.yaml")); err == nil {
+			stepf("chart %s: local directory", o.ChartPath)
 			return filepath.Abs(o.ChartPath)
 		}
 		if strings.ContainsRune(o.ChartPath, filepath.Separator) || o.ChartRepo == "" {
@@ -250,11 +252,13 @@ func resolveChart(o Options) (string, error) {
 	// Resolve the name in the repo to its URL first: Helm's LocateChart would
 	// otherwise take a same-named local directory.
 	settings := cli.New()
+	stepf("chart %s %s: looking it up in %s", o.ChartPath, o.ChartVersion, o.ChartRepo)
 	url, err := repo.FindChartInRepoURL(o.ChartRepo, o.ChartPath, o.ChartVersion, "", "", "", getter.All(settings))
 	if err != nil {
 		return "", fmt.Errorf("fetch chart %s %s from %s: %w", o.ChartPath, o.ChartVersion, o.ChartRepo, err)
 	}
 	cpo := action.ChartPathOptions{Version: o.ChartVersion}
+	stepf("downloading %s", url)
 	path, err := cpo.LocateChart(url, settings)
 	if err != nil {
 		return "", fmt.Errorf("fetch chart %s %s from %s: %w", o.ChartPath, o.ChartVersion, o.ChartRepo, err)
@@ -291,6 +295,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	stepf("loaded chart %s-%s, digest %s", chrt.Name(), chrt.Metadata.Version, shortHash(digest))
 	var warnings []string
 	if err := CheckNoCRDs(chrt); err != nil {
 		if o.Strict {
@@ -302,9 +307,17 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	var files []string
+	for _, f := range append([]string{o.OverridesFile}, o.OverridesFiles...) {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	stepf("read %d values file(s), later ones win: %s", len(files), strings.Join(files, ", "))
 	if overrides, err = withSuppliedValues(overrides); err != nil {
 		return nil, err
 	}
+	stepf("checking the chart for generated secrets, certificates and cluster lookups")
 	pure := "enforced"
 	if o.AllowImpureTemplates {
 		pure = "skipped"
@@ -331,10 +344,16 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		return nil, err
 	}
 	c.helm.Capabilities = caps
+	stepf("cluster: kube %s, %d API versions", caps.KubeVersion.Version, len(caps.APIVersions))
 
 	bl, cur, err := c.readBaseline(ctx, o.ReleaseName, o.Namespace)
 	if err != nil {
 		return nil, err
+	}
+	if bl.Revision == 0 {
+		stepf("release %s: %s (not installed yet)", o.ReleaseName, bl.State)
+	} else {
+		stepf("release %s: %s, revision %d (%s)", o.ReleaseName, bl.State, bl.Revision, bl.Status)
 	}
 	if bl.State == StateGitOps {
 		if o.Strict {
@@ -356,10 +375,12 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		return nil, err
 	}
 
+	stepf("cluster ID %s; rendering with Helm (dry run, nothing is written)", clusterID)
 	rel, err := c.dryRun(o.ReleaseName, o.Namespace, bl, chrt, overrides)
 	if err != nil {
 		return nil, fmt.Errorf("render: %w", err)
 	}
+	stepf("rendered %d bytes of manifests and %d hooks", len(rel.Manifest), len(rel.Hooks))
 
 	p := &Plan{
 		FormatVersion: FormatVersion,
