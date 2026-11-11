@@ -221,3 +221,35 @@ func TestEncodeAccessTokenRoundTrip(t *testing.T) {
 		t.Fatalf("%q %q %v", id, sec, err)
 	}
 }
+
+func TestPreflightSharedStorageOnAWS(t *testing.T) {
+	run := func(feature map[string]interface{}, objs ...runtime.Object) *PreflightReport {
+		cs := fake.NewSimpleClientset(append(objs, pfNode("ip-1", "aws:///us-east-1a/i-1", "amd64"), pfDeploy("kube-system", "coredns", 1))...)
+		cs.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{Major: "1", Minor: "31", GitVersion: "v1.31.0"}
+		env := preflightEnv{cs: cs, metrics: func(context.Context) error { return nil }, groups: func() ([]string, error) { return nil, nil }}
+		vals := map[string]interface{}{"global": map[string]interface{}{"dynamicLogParsing": feature}}
+		r, err := preflight(context.Background(), env, "kubesense", vals)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	name := "Shared storage: dynamicLogParsing"
+	if l := level(run(map[string]interface{}{"enabled": true}), name); l != Fail {
+		t.Errorf("no storage: %s", l)
+	}
+	if l := level(run(map[string]interface{}{"enabled": true, "nfs": map[string]interface{}{"enabled": true, "host": "10.0.0.5"}}), name); l != Warn {
+		t.Errorf("NFS on AWS should warn (prefer EFS): %s", l)
+	}
+	efs := map[string]interface{}{"enabled": true, "filesystem": map[string]interface{}{"enabled": true, "storageClass": "efs-sc"}}
+	if l := level(run(efs, pfClass("efs-sc", "efs.csi.aws.com", false, true)), name); l != Pass {
+		t.Errorf("EFS: %s", l)
+	}
+	gp3 := map[string]interface{}{"enabled": true, "filesystem": map[string]interface{}{"enabled": true, "storageClass": "gp3"}}
+	if l := level(run(gp3, pfClass("gp3", "ebs.csi.aws.com", true, true)), name); l != Fail {
+		t.Errorf("gp3 cannot do RWX: %s", l)
+	}
+	if l := level(run(map[string]interface{}{"enabled": false}), name); l != "" {
+		t.Errorf("feature off: %s", l)
+	}
+}

@@ -123,6 +123,9 @@ func preflight(ctx context.Context, e preflightEnv, ns string, values map[string
 	if err != nil {
 		return nil, err
 	}
+	if err := checkSharedStorage(ctx, e, r.Provider, values, add); err != nil {
+		return nil, err
+	}
 	checkCloud(ctx, e, r.Provider, nodes.Items, drivers, add)
 	checkIngress(ctx, e, r.Provider, add)
 	checkNamespace(ctx, e, ns, add)
@@ -670,3 +673,74 @@ func (r *PreflightReport) JSON(w io.Writer) error {
 
 // ReadValueFiles merges values files left to right, like helm -f.
 func ReadValueFiles(paths ...string) (map[string]interface{}, error) { return readOverrides(paths...) }
+
+// checkSharedStorage: dynamic log parsing and alert config need a volume many
+// pods mount at once (ReadWriteMany). On AWS that should be EFS through the
+// EFS CSI driver; the bundled NFS server is the fallback where a cloud file
+// service is not available.
+func checkSharedStorage(ctx context.Context, e preflightEnv, provider string, values map[string]interface{}, add addFn) error {
+	var classes map[string]string
+	efsFix := "install the EFS CSI driver add-on, create an EFS file system with a mount target in each node subnet (NFS port 2049 open from the nodes), " +
+		"a StorageClass efs-sc (provisioner efs.csi.aws.com, provisioningMode: efs-ap, fileSystemId), then set filesystem: {enabled: true, storageClass: efs-sc}"
+	for _, f := range nfsFeatures {
+		fm := getMap(values, "global", f)
+		if on, _ := fm["enabled"].(bool); !on {
+			continue
+		}
+		name := "Shared storage: " + f
+		fs := getMap(fm, "filesystem")
+		nfs := getMap(fm, "nfs")
+		switch {
+		case fs != nil && fs["enabled"] == true:
+			sc, _ := fs["storageClass"].(string)
+			if sc == "" {
+				add("Storage", name, Warn, "filesystem has no storageClass, so it uses the default class, which usually cannot do ReadWriteMany",
+					"set global."+f+".filesystem.storageClass")
+				continue
+			}
+			if classes == nil {
+				l, err := e.cs.StorageV1().StorageClasses().List(ctx, metav1.ListOptions{})
+				if err != nil {
+					return err
+				}
+				classes = map[string]string{}
+				for _, c := range l.Items {
+					classes[c.Name] = c.Provisioner
+				}
+			}
+			prov, ok := classes[sc]
+			if !ok {
+				continue // "StorageClass <sc> not found" is already reported
+			}
+			rwx := false
+			for _, p := range rwxProvisioners {
+				if strings.Contains(prov, p) {
+					rwx = true
+				}
+			}
+			if !rwx {
+				fix := "use a ReadWriteMany class (EFS, Azure Files, Filestore)"
+				if provider == "aws" {
+					fix = efsFix
+				}
+				add("Storage", name, Fail, fmt.Sprintf("class %s (%s) cannot do ReadWriteMany", sc, prov), fix)
+				continue
+			}
+			add("Storage", name, Pass, fmt.Sprintf("ReadWriteMany class %s (%s)", sc, prov), "")
+		case nfs != nil && (nfs["enabled"] == true || nfs["host"] != nil):
+			host, _ := nfs["host"].(string)
+			if provider == "aws" {
+				add("Storage", name, Warn, fmt.Sprintf("uses NFS (host %q); on AWS prefer EFS", host), efsFix)
+			} else {
+				add("Storage", name, Info, fmt.Sprintf("uses NFS host %q; nodes must be able to mount NFS", host), "")
+			}
+		default:
+			fix := "plan with --nfs to install the NFS server, or set filesystem to a ReadWriteMany class"
+			if provider == "aws" {
+				fix = efsFix
+			}
+			add("Storage", name, Fail, "enabled, but no shared storage is set: its pods will not start", fix)
+		}
+	}
+	return nil
+}

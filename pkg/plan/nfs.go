@@ -249,7 +249,7 @@ func sharedStorageWarnings(overrides map[string]interface{}, nfs bool) []string 
 		if h, _ := getMap(fm, "nfs")["host"].(string); h != "" {
 			continue
 		}
-		out = append(out, fmt.Sprintf("global.%s is on but has no shared storage: add --nfs to install the NFS server, or set global.%s.filesystem (a ReadWriteMany class such as EFS) or global.%s.nfs.host", f, f, f))
+		out = append(out, fmt.Sprintf("global.%s is on but has no shared storage: set global.%s.filesystem to a ReadWriteMany class (EFS on AWS, Azure Files, Filestore), or add --nfs to install the NFS server", f, f))
 	}
 	return out
 }
