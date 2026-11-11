@@ -202,7 +202,7 @@ func (p *Plan) showAccessToken(w io.Writer) {
 		}
 		fmt.Fprintf(w, Bold("Access:  ")+" access token present, key %s%s; unchanged\n", MaskKeyID(st.KeyID), when)
 	default:
-		fmt.Fprintf(w, Bold("Access:  ")+" no access token installed: fine when images come from your own registry; add one with --access-token-file\n")
+		fmt.Fprintf(w, Bold("Access:  ")+" no access token installed: fine when images come from your own registry; add one with --access-token\n")
 	}
 }
 

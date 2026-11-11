@@ -103,6 +103,8 @@ type Plan struct {
 	// installs or rotates it when a token was given.
 	AccessTokenState AccessTokenState `json:"accessTokenState"`
 	AccessToken      *AccessTokenStep `json:"accessToken,omitempty"`
+	NFSState         NFSState         `json:"nfsState"`
+	NFS              *NFSStep         `json:"nfs,omitempty"`
 }
 
 // ChartRef pins the chart artifact.
@@ -167,6 +169,10 @@ type Options struct {
 	// AccessTokenChart overrides the chart (a path, or a name in ChartRepo).
 	AccessToken      string
 	AccessTokenChart string
+	// NFS installs the bundled NFS server (when absent) and points the
+	// enabled NFS features at it. NFSChart overrides the chart.
+	NFS      bool
+	NFSChart string
 
 	// AllowImpureTemplates skips the pure-render lint. Spike/test only: it
 	// exists to demonstrate what the execution-boundary check catches on its own.
@@ -319,6 +325,10 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	nfsState, nfsStep, err := c.planNFS(ctx, o, overrides)
+	if err != nil {
+		return nil, err
+	}
 	clusterID, err := c.clusterID(ctx)
 	if err != nil {
 		return nil, err
@@ -355,6 +365,8 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 
 		AccessTokenState: tokenState,
 		AccessToken:      tokenStep,
+		NFSState:         nfsState,
+		NFS:              nfsStep,
 	}
 	p.ExpiresAt = p.CreatedAt.Add(o.TTL)
 	if bl.State != StateFresh {

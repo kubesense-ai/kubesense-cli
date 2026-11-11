@@ -107,6 +107,7 @@ func TestPreflightEKSReady(t *testing.T) {
 		&storagev1.CSIDriver{ObjectMeta: metav1.ObjectMeta{Name: "ebs.csi.aws.com"}},
 		pfClass("gp3", "ebs.csi.aws.com", true, true),
 		&netv1.IngressClass{ObjectMeta: metav1.ObjectMeta{Name: "alb"}, Spec: netv1.IngressClassSpec{Controller: "ingress.k8s.aws/alb"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "kubesense"}},
 	)
 	if r.Failed() {
 		var b bytes.Buffer

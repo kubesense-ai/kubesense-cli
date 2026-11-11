@@ -20,6 +20,7 @@ type Status struct {
 	Cluster                string
 	Release                *release.Release
 	AccessToken            AccessTokenState
+	NFS                    NFSState
 	Workloads              []WorkloadStatus
 }
 
@@ -35,6 +36,9 @@ func ReadStatus(ctx context.Context, t Target, namespace, name string) (*Status,
 		return nil, err
 	}
 	if s.AccessToken, _, err = c.accessTokenState(); err != nil {
+		return nil, err
+	}
+	if s.NFS, err = c.nfsState(ctx, namespace); err != nil {
 		return nil, err
 	}
 	if s.Workloads, err = releaseWorkloads(ctx, c.clientset, namespace, name); err != nil {
@@ -86,6 +90,7 @@ func (s *Status) Show(w io.Writer) {
 		}
 	}
 	(&Plan{AccessTokenState: s.AccessToken}).showAccessToken(w)
+	(&Plan{NFSState: s.NFS}).showNFS(w)
 
 	if len(s.Workloads) == 0 {
 		return

@@ -83,6 +83,8 @@ type ApplyResult struct {
 	LiveChecks       int
 	// AccessToken says what the access-token step did; empty when nothing.
 	AccessToken string
+	// NFS says what the NFS step did; empty when nothing.
+	NFS string
 }
 
 // Apply executes the plan only if its inputs still hold; otherwise it returns
@@ -192,7 +194,12 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !p.HasReleaseChanges() {
+	// Then the NFS server, whose IP goes into the values.
+	nfsNote, err := applyNFS(ctx, p, o.Target, overrides, o.Logf)
+	if err != nil {
+		return &ApplyResult{AccessToken: tokenNote}, err
+	}
+	if !p.HasReleaseChanges() && nfsNote == "" {
 		return &ApplyResult{Action: "none", Revision: p.Baseline.Revision, Status: p.Baseline.Status, AccessToken: tokenNote}, nil
 	}
 
@@ -226,7 +233,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	default:
 		return nil, fmt.Errorf("unknown plan action %q", p.Action)
 	}
-	res := &ApplyResult{Action: p.Action, AccessToken: tokenNote}
+	res := &ApplyResult{Action: p.Action, AccessToken: tokenNote, NFS: nfsNote}
 	if gate.opened || gate.err != nil {
 		res.LiveChecks = len(p.LiveObjects)
 	}

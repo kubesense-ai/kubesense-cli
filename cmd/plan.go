@@ -20,6 +20,8 @@ var (
 	planValues                                              []string
 	planStrict                                              bool
 	planAccessTokenFile, planAccessTokenChart               string
+	planNFS                                                 bool
+	planNFSChart                                            string
 	planAskAccessToken                                      bool
 	planTTL                                                 time.Duration
 	planDetailedExitCode                                    bool
@@ -44,6 +46,10 @@ The access token (image pulls from KubeSense's registry) is optional. With
 shown), or reads $KUBESENSE_ACCESS_KEY_ID and $KUBESENSE_ACCESS_KEY_SECRET.
 --access-token-file takes the issued base64 token instead. Without either,
 the plan only reports whether one is installed.
+
+Dynamic log parsing and alert config need a ReadWriteMany volume. Without
+EFS, Azure Files or Filestore, --nfs installs the bundled NFS server (release
+kubesense-nfs) before KubeSense and sets its IP in your values.
 
 Examples:
   kubesense plan --chart kubesense-server --version 2.3.9 -f overrides.yaml
@@ -78,6 +84,7 @@ Examples:
 			Strict:         planStrict,
 			Logf:           debugf(),
 			AccessToken:    token, AccessTokenChart: planAccessTokenChart,
+			NFS: planNFS, NFSChart: planNFSChart,
 		})
 		if err != nil {
 			return err
@@ -125,6 +132,8 @@ func init() {
 	f.BoolVar(&planStrict, "strict", false, "refuse charts that generate secrets, certificates or read the cluster, so apply can check the exact render (the KubeSense chart does all three)")
 	f.StringVar(&planAccessTokenFile, "access-token-file", "", "install or rotate the image-pull access token from this file (\"-\" reads stdin); not needed when images come from your own registry")
 	f.BoolVar(&planAskAccessToken, "access-token", false, "install or rotate the access token: asks for the access key ID and secret (or reads $KUBESENSE_ACCESS_KEY_ID and $KUBESENSE_ACCESS_KEY_SECRET)")
+	f.BoolVar(&planNFS, "nfs", false, "install the bundled NFS server if absent, and point global.dynamicLogParsing / global.alertconfig (whichever you enabled) at it; not needed with EFS, Azure Files or Filestore")
+	f.StringVar(&planNFSChart, "nfs-chart", "", "NFS server chart: a local path, or a name in --repo (default: nfs)")
 	f.StringVar(&planAccessTokenChart, "access-token-chart", "", "access-token chart: a local path, or a name in --repo (default: access-token)")
 	f.BoolVar(&planDetailedExitCode, "detailed-exitcode", false, "exit 0 with no changes, 2 with changes, 1 on error")
 	_ = planCmd.MarkFlagRequired("chart")

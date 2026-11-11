@@ -184,6 +184,7 @@ func (p *Plan) Show(w io.Writer) {
 	fmt.Fprintf(w, Bold("Created:")+"  %s by kubesense %s (Helm %s); expires %s\n",
 		p.CreatedAt.Format(time.RFC3339), p.CLIVersion, p.HelmVersion, p.ExpiresAt.Format(time.RFC3339))
 	p.showAccessToken(w)
+	p.showNFS(w)
 	for _, wn := range p.Warnings {
 		fmt.Fprintf(w, "%s  %s\n", Yellow("WARNING:"), Yellow(wn))
 	}
@@ -240,7 +241,7 @@ func (p *Plan) hasMasked() bool {
 
 // HasChanges reports whether applying the plan would change anything.
 func (p *Plan) HasChanges() bool {
-	return p.HasReleaseChanges() || (p.AccessToken != nil && p.AccessToken.Action != "unchanged")
+	return p.HasReleaseChanges() || (p.AccessToken != nil && p.AccessToken.Action != "unchanged") || (p.NFS != nil && p.NFS.Action == "install")
 }
 
 // HasReleaseChanges: the KubeSense release itself changes.

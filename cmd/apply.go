@@ -61,6 +61,9 @@ Example:
 			verb := map[string]string{"install": "install", "upgrade": "rotate"}[s.Action]
 			fmt.Printf("  first: %s\n", plan.Yellow(fmt.Sprintf("%s the access token (key %s)", verb, plan.MaskKeyID(s.KeyID()))))
 		}
+		if s := p.NFS; s != nil && s.Action == "install" {
+			fmt.Printf("  first: %s\n", plan.Yellow(fmt.Sprintf("install the NFS server (release %s)", plan.NFSRelease)))
+		}
 		if !p.HasChanges() {
 			fmt.Println("The plan has no changes; nothing to apply.")
 			return nil
@@ -84,6 +87,9 @@ Example:
 		}
 		if res.AccessToken != "" {
 			fmt.Printf("\n%s %s.\n", plan.Green("Applied:"), res.AccessToken)
+		}
+		if res.NFS != "" {
+			fmt.Printf("%s %s.\n", plan.Green("Applied:"), res.NFS)
 		}
 		if res.Action == "none" {
 			fmt.Printf("Release %s unchanged at revision %d.\n", p.ReleaseName, res.Revision)

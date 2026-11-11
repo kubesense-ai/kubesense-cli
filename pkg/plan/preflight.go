@@ -568,7 +568,7 @@ func checkIngress(ctx context.Context, e preflightEnv, provider string, add addF
 func checkNamespace(ctx context.Context, e preflightEnv, ns string, add addFn) {
 	n, err := e.cs.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		add("Namespace", ns, Info, "does not exist yet; apply creates it", "")
+		add("Namespace", ns, Fail, "does not exist: apply never creates namespaces", "kubectl create namespace "+ns)
 		return
 	}
 	if err != nil {
