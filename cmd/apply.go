@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"kubesense-cli/pkg/plan"
@@ -77,7 +79,22 @@ Example:
 		}
 
 		ctx := context.Background()
-		res, err := plan.Apply(ctx, p, plan.ApplyOptions{Target: target, Logf: debugf()})
+		// Ctrl-C cancels Helm instead of killing the process, so Helm records
+		// the release as failed (recoverable with a new plan) rather than
+		// leaving it pending. A second Ctrl-C exits at once.
+		applyCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		finished := make(chan struct{})
+		go func() {
+			select {
+			case <-applyCtx.Done():
+				fmt.Fprintln(os.Stderr, plan.Yellow("\nInterrupted: stopping Helm so it records the release as failed (Ctrl-C again to exit now)..."))
+				stop() // the next Ctrl-C gets Go's default: exit
+			case <-finished:
+			}
+		}()
+		res, err := plan.Apply(applyCtx, p, plan.ApplyOptions{Target: target, Logf: debugf(), Timeout: applyTimeout})
+		close(finished)
+		stop()
 		if err != nil {
 			var r *plan.Refusal
 			if errors.As(err, &r) {
@@ -134,5 +151,5 @@ func init() {
 	f.StringVar(&applyKubeconfig, "kubeconfig", "", "kubeconfig file (default: $KUBECONFIG, then ~/.kube/config)")
 	f.StringVar(&applyContext, "context", "", "kubeconfig context (default: the one the plan was made with); it must reach the planned cluster")
 	f.BoolVar(&applyYes, "yes", false, "apply without asking (for CI)")
-	f.DurationVar(&applyTimeout, "timeout", 10*time.Minute, "how long to follow the rollout after applying")
+	f.DurationVar(&applyTimeout, "timeout", 10*time.Minute, "how long to wait for the release's hooks (database migrations) and then for the rollout")
 }

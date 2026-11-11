@@ -60,6 +60,10 @@ type ApplyOptions struct {
 	Target Target
 	Logf   func(string, ...interface{})
 	Now    func() time.Time
+	// Timeout bounds how long Helm waits for hooks (the database migration
+	// job). Without it Helm waits forever, and an interrupted wait leaves the
+	// release pending. Default 10 minutes.
+	Timeout time.Duration
 
 	// --- spike/test-only knobs (unexported: not reachable from the CLI) ---
 	skipDigestCheck bool   // prove the render-hash checks catch what the digest check would
@@ -222,12 +226,14 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 		in.ReleaseName, in.Namespace = p.ReleaseName, p.Namespace
 		in.PostRenderer = pr
 		in.CreateNamespace = false // namespace is a precondition, not part of the plan
+		in.Timeout = o.timeout()
 		rel, err = in.RunWithContext(ctx, chrt, overrides)
 	case "upgrade":
 		up := action.NewUpgrade(c.helm)
 		up.Namespace = p.Namespace
 		up.PostRenderer = pr
 		up.ResetValues = true
+		up.Timeout = o.timeout()
 		up.MaxHistory = 0 // pruning would delete records before the gated Create (storage.go:62)
 		rel, err = up.RunWithContext(ctx, p.ReleaseName, chrt, overrides)
 	default:
@@ -257,6 +263,13 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	res.Revision, res.Status = rel.Version, rel.Info.Status.String()
 	res.ManifestHash, res.HooksHash = ManifestHash(rel.Manifest), HooksHash(rel.Hooks)
 	return res, nil
+}
+
+func (o ApplyOptions) timeout() time.Duration {
+	if o.Timeout > 0 {
+		return o.Timeout
+	}
+	return 10 * time.Minute
 }
 
 func (c *conn) checkBaselines(ctx context.Context, p *Plan, stage string) error {
