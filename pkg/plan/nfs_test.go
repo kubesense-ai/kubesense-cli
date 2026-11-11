@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,5 +119,27 @@ func TestSharedStorageWarnings(t *testing.T) {
 	}
 	if w := sharedStorageWarnings(on(nil), true); len(w) != 0 {
 		t.Fatalf("--nfs given: %v", w)
+	}
+}
+
+func TestResolveChartSkipsNonChartDirectory(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+	if err := os.Mkdir("nfs", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolveChart(Options{ChartPath: "nfs"}); err == nil || !strings.Contains(err.Error(), "no Chart.yaml") {
+		t.Fatalf("no repo: want no-Chart.yaml error, got %v", err)
+	}
+	if _, err := resolveChart(Options{ChartPath: "./nfs", ChartRepo: "http://127.0.0.1:1/"}); err == nil || !strings.Contains(err.Error(), "no Chart.yaml") {
+		t.Fatalf("explicit path: want no-Chart.yaml error, got %v", err)
+	}
+	// A bare name with a repo goes to the repo (unreachable here), not the directory.
+	if _, err := resolveChart(Options{ChartPath: "nfs", ChartRepo: "http://127.0.0.1:1/"}); err == nil || !strings.Contains(err.Error(), "fetch chart nfs") {
+		t.Fatalf("bare name: want a repo fetch, got %v", err)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -21,7 +22,9 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/repo"
 	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -227,14 +230,32 @@ func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
 // resolveChart returns a local path for the chart: o.ChartPath itself when it
 // exists, otherwise the chart of that name downloaded from o.ChartRepo.
 func resolveChart(o Options) (string, error) {
-	if _, err := os.Stat(o.ChartPath); err == nil {
-		return filepath.Abs(o.ChartPath)
+	// A local chart is an archive or a directory with a Chart.yaml. Any other
+	// directory that happens to share the name (kube-devops has an nfs/
+	// directory next to charts/) is not one: a bare name then goes to the repo.
+	if fi, err := os.Stat(o.ChartPath); err == nil {
+		if !fi.IsDir() {
+			return filepath.Abs(o.ChartPath)
+		}
+		if _, err := os.Stat(filepath.Join(o.ChartPath, "Chart.yaml")); err == nil {
+			return filepath.Abs(o.ChartPath)
+		}
+		if strings.ContainsRune(o.ChartPath, filepath.Separator) || o.ChartRepo == "" {
+			return "", fmt.Errorf("chart %q: directory has no Chart.yaml", o.ChartPath)
+		}
 	}
 	if o.ChartRepo == "" {
 		return "", fmt.Errorf("chart %q: no such file or directory, and no chart repository given", o.ChartPath)
 	}
-	cpo := action.ChartPathOptions{RepoURL: o.ChartRepo, Version: o.ChartVersion}
-	path, err := cpo.LocateChart(o.ChartPath, cli.New())
+	// Resolve the name in the repo to its URL first: Helm's LocateChart would
+	// otherwise take a same-named local directory.
+	settings := cli.New()
+	url, err := repo.FindChartInRepoURL(o.ChartRepo, o.ChartPath, o.ChartVersion, "", "", "", getter.All(settings))
+	if err != nil {
+		return "", fmt.Errorf("fetch chart %s %s from %s: %w", o.ChartPath, o.ChartVersion, o.ChartRepo, err)
+	}
+	cpo := action.ChartPathOptions{Version: o.ChartVersion}
+	path, err := cpo.LocateChart(url, settings)
 	if err != nil {
 		return "", fmt.Errorf("fetch chart %s %s from %s: %w", o.ChartPath, o.ChartVersion, o.ChartRepo, err)
 	}
