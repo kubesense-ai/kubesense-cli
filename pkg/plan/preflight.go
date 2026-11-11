@@ -69,8 +69,9 @@ type preflightEnv struct {
 	groups func() ([]string, error)
 }
 
-// RunPreflight connects and runs every check.
-func RunPreflight(ctx context.Context, t Target, namespace string) (*PreflightReport, error) {
+// RunPreflight connects and runs every check. With values (the merged -f
+// files), it also checks what those values name: storage classes.
+func RunPreflight(ctx context.Context, t Target, namespace string, values map[string]interface{}) (*PreflightReport, error) {
 	c, err := t.connect(namespace, nil, nil)
 	if err != nil {
 		return nil, err
@@ -92,14 +93,14 @@ func RunPreflight(ctx context.Context, t Target, namespace string) (*PreflightRe
 			return out, nil
 		},
 	}
-	r, err := preflight(ctx, env, namespace)
+	r, err := preflight(ctx, env, namespace, values)
 	if r != nil {
 		r.Cluster = c.context + " (" + c.serverURL + ")"
 	}
 	return r, err
 }
 
-func preflight(ctx context.Context, e preflightEnv, ns string) (*PreflightReport, error) {
+func preflight(ctx context.Context, e preflightEnv, ns string, values map[string]interface{}) (*PreflightReport, error) {
 	r := &PreflightReport{Namespace: ns}
 	add := func(group, name string, l Level, detail, fix string) {
 		r.Checks = append(r.Checks, Check{Group: group, Name: name, Level: l, Detail: detail, Fix: fix})
@@ -116,7 +117,7 @@ func preflight(ctx context.Context, e preflightEnv, ns string) (*PreflightReport
 	checkNodes(nodes.Items, add)
 	checkDNS(ctx, e, add)
 	checkMetrics(ctx, e, add)
-	drivers, err := checkStorage(ctx, e, add)
+	drivers, err := checkStorage(ctx, e, storageClassRefs(values), add)
 	if err != nil {
 		return nil, err
 	}
@@ -324,7 +325,7 @@ func checkMetrics(ctx context.Context, e preflightEnv, add addFn) {
 // rwxProvisioners can give ReadWriteMany volumes.
 var rwxProvisioners = []string{"efs.csi.aws.com", "file.csi.azure.com", "filestore.csi.storage.gke.io", "nfs", "cephfs", "kubernetes.io/azure-file"}
 
-func checkStorage(ctx context.Context, e preflightEnv, add addFn) (map[string]bool, error) {
+func checkStorage(ctx context.Context, e preflightEnv, refs map[string][]string, add addFn) (map[string]bool, error) {
 	drivers := map[string]bool{}
 	dl, err := e.cs.StorageV1().CSIDrivers().List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -364,7 +365,7 @@ func checkStorage(ctx context.Context, e preflightEnv, add addFn) (map[string]bo
 	switch len(def) {
 	case 0:
 		l := Fail
-		if len(scs.Items) > 0 {
+		if len(scs.Items) > 0 || len(refs) > 0 {
 			l = Warn
 		}
 		add("Storage", "Default StorageClass", l, fmt.Sprintf("no default StorageClass (%d classes exist)", len(scs.Items)),
@@ -379,7 +380,65 @@ func checkStorage(ctx context.Context, e preflightEnv, add addFn) (map[string]bo
 		add("Storage", "ReadWriteMany", Info, "no ReadWriteMany class: needed only for dynamic log parsing",
 			"use the NFS chart (SOP §2.4), or EFS / Azure Files / Filestore")
 	}
+	// The classes your values name must exist, and their CSI driver too.
+	byName := map[string]string{}
+	for _, sc := range scs.Items {
+		byName[sc.Name] = sc.Provisioner
+	}
+	var names []string
+	for n := range refs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		where := strings.Join(refs[n], ", ")
+		prov, ok := byName[n]
+		switch {
+		case !ok:
+			add("Storage", "StorageClass "+n, Fail, fmt.Sprintf("not found, but your values use it (%s): those volumes will stay Pending", where),
+				fmt.Sprintf("create StorageClass %s, or change %s in your values", n, refs[n][0]))
+		case strings.Contains(prov, ".csi.") && !drivers[prov]:
+			add("Storage", "StorageClass "+n, Fail, fmt.Sprintf("exists, but its provisioner %s has no CSI driver installed", prov), "install the "+prov+" CSI driver")
+		default:
+			add("Storage", "StorageClass "+n, Pass, fmt.Sprintf("%s, used by %s", prov, where), "")
+		}
+	}
 	return drivers, nil
+}
+
+// storageClassRefs finds every storageClass / storageClassName your values
+// set, with the keys that set it. Empty values, "-" and templates are skipped:
+// those fall back to the default class.
+func storageClassRefs(values map[string]interface{}) map[string][]string {
+	out := map[string][]string{}
+	var walk func(path string, v interface{})
+	walk = func(path string, v interface{}) {
+		switch t := v.(type) {
+		case map[string]interface{}:
+			for k, c := range t {
+				p := k
+				if path != "" {
+					p = path + "." + k
+				}
+				if s, ok := c.(string); ok && (k == "storageClass" || k == "storageClassName") {
+					if s != "" && s != "-" && !strings.Contains(s, "{{") {
+						out[s] = append(out[s], p)
+					}
+					continue
+				}
+				walk(p, c)
+			}
+		case []interface{}:
+			for i, c := range t {
+				walk(fmt.Sprintf("%s[%d]", path, i), c)
+			}
+		}
+	}
+	walk("", values)
+	for _, v := range out {
+		sort.Strings(v)
+	}
+	return out
 }
 
 func checkCloud(ctx context.Context, e preflightEnv, provider string, nodes []corev1.Node, drivers map[string]bool, add addFn) {
@@ -551,3 +610,6 @@ func (r *PreflightReport) JSON(w io.Writer) error {
 	enc.SetIndent("", "  ")
 	return enc.Encode(r)
 }
+
+// ReadValueFiles merges values files left to right, like helm -f.
+func ReadValueFiles(paths ...string) (map[string]interface{}, error) { return readOverrides(paths...) }

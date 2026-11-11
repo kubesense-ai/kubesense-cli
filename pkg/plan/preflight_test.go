@@ -62,7 +62,7 @@ func pfRun(t *testing.T, admin, metrics bool, objs ...runtime.Object) *Preflight
 		},
 		groups: func() ([]string, error) { return nil, nil },
 	}
-	r, err := preflight(context.Background(), env, "kubesense")
+	r, err := preflight(context.Background(), env, "kubesense", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestPreflightAKSAndPodSecurity(t *testing.T) {
 func TestPreflightOldKubernetes(t *testing.T) {
 	cs := fake.NewSimpleClientset(pfNode("n", "gce://p/z/n", "amd64"))
 	cs.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{Major: "1", Minor: "20+", GitVersion: "v1.20.15"}
-	r, err := preflight(context.Background(), preflightEnv{cs: cs, metrics: func(context.Context) error { return nil }, groups: func() ([]string, error) { return []string{"security.openshift.io"}, nil }}, "kubesense")
+	r, err := preflight(context.Background(), preflightEnv{cs: cs, metrics: func(context.Context) error { return nil }, groups: func() ([]string, error) { return []string{"security.openshift.io"}, nil }}, "kubesense", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,5 +161,32 @@ func TestPreflightNonCSIProvisioner(t *testing.T) {
 		pfClass("standard", "rancher.io/local-path", true, true))
 	if level(r, "Provisioner") != "" {
 		t.Fatal("local-path is not a CSI driver; must not need a CSIDriver object")
+	}
+}
+
+func TestPreflightValuesStorageClass(t *testing.T) {
+	cs := fake.NewSimpleClientset(pfNode("ip-1", "aws:///us-east-1a/i-1", "amd64"), pfDeploy("kube-system", "coredns", 1))
+	cs.Discovery().(*fakediscovery.FakeDiscovery).FakedServerVersion = &version.Info{Major: "1", Minor: "31", GitVersion: "v1.31.0"}
+	env := preflightEnv{cs: cs, metrics: func(context.Context) error { return nil }, groups: func() ([]string, error) { return nil, nil }}
+	vals := map[string]interface{}{
+		"global":    map[string]interface{}{"storageClass": "gp3"},
+		"datastore": map[string]interface{}{"persistence": map[string]interface{}{"storageClass": "gp3"}},
+		"grafana":   map[string]interface{}{"persistence": map[string]interface{}{"storageClass": "{{ .Values.global.storageClass }}"}},
+	}
+	r, err := preflight(context.Background(), env, "kubesense", vals)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c *Check
+	for i := range r.Checks {
+		if r.Checks[i].Name == "StorageClass gp3" {
+			c = &r.Checks[i]
+		}
+	}
+	if c == nil || c.Level != Fail || !strings.Contains(c.Detail, "datastore.persistence.storageClass, global.storageClass") {
+		t.Fatalf("got %+v", c)
+	}
+	if level(r, "Default StorageClass") != Warn {
+		t.Error("no default class should only warn when the values name a class")
 	}
 }

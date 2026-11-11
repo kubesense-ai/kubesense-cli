@@ -12,6 +12,7 @@ import (
 
 var (
 	pfKubeconfig, pfContext, pfNamespace, pfOutput string
+	pfValues                                       []string
 )
 
 var preflightCmd = &cobra.Command{
@@ -30,15 +31,27 @@ missing:
   Network    an ingress controller
   Namespace  pod security allows the logsensor's hostPath mount, existing releases
 
+With -f, it also checks what your values name: every storageClass they set
+must exist (and have its CSI driver).
+
 The cloud is detected from the nodes. Read-only. Exits 1 when a check fails.
 
 Examples:
   kubesense preflight
   kubesense preflight -n observability --context prod-eks
+  kubesense preflight -f overrides.yaml
   kubesense preflight -o json`,
 	Args: cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
-		r, err := plan.RunPreflight(context.Background(), plan.Target{Kubeconfig: pfKubeconfig, Context: pfContext}, pfNamespace)
+		var vals map[string]interface{}
+		if len(pfValues) > 0 {
+			v, err := plan.ReadValueFiles(pfValues...)
+			if err != nil {
+				return err
+			}
+			vals = v
+		}
+		r, err := plan.RunPreflight(context.Background(), plan.Target{Kubeconfig: pfKubeconfig, Context: pfContext}, pfNamespace, vals)
 		if err != nil {
 			return err
 		}
@@ -66,6 +79,7 @@ func init() {
 	f.StringVar(&pfKubeconfig, "kubeconfig", "", "kubeconfig file (default: $KUBECONFIG, then ~/.kube/config)")
 	f.StringVar(&pfContext, "context", "", "kubeconfig context (default: the current context)")
 	f.StringVarP(&pfNamespace, "namespace", "n", "kubesense", "namespace KubeSense will be installed in")
+	f.StringArrayVarP(&pfValues, "values", "f", nil, "values files you will install with; checks the storage classes they name (repeat to merge)")
 	f.StringVarP(&pfOutput, "output", "o", "text", "text or json")
 	rootCmd.AddCommand(preflightCmd)
 }
