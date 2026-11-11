@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"kubesense-cli/pkg/plan"
@@ -61,6 +63,9 @@ Example:
 			verb := map[string]string{"install": "install", "upgrade": "rotate"}[s.Action]
 			fmt.Printf("  first: %s\n", plan.Yellow(fmt.Sprintf("%s the access token (key %s)", verb, plan.MaskKeyID(s.KeyID()))))
 		}
+		if s := p.NFS; s != nil && s.Action == "install" {
+			fmt.Printf("  first: %s\n", plan.Yellow(fmt.Sprintf("install the NFS server (release %s)", plan.NFSRelease)))
+		}
 		if !p.HasChanges() {
 			fmt.Println("The plan has no changes; nothing to apply.")
 			return nil
@@ -74,7 +79,22 @@ Example:
 		}
 
 		ctx := context.Background()
-		res, err := plan.Apply(ctx, p, plan.ApplyOptions{Target: target, Logf: debugf()})
+		// Ctrl-C cancels Helm instead of killing the process, so Helm records
+		// the release as failed (recoverable with a new plan) rather than
+		// leaving it pending. A second Ctrl-C exits at once.
+		applyCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		finished := make(chan struct{})
+		go func() {
+			select {
+			case <-applyCtx.Done():
+				fmt.Fprintln(os.Stderr, plan.Yellow("\nInterrupted: stopping Helm so it records the release as failed (Ctrl-C again to exit now)..."))
+				stop() // the next Ctrl-C gets Go's default: exit
+			case <-finished:
+			}
+		}()
+		res, err := plan.Apply(applyCtx, p, plan.ApplyOptions{Target: target, Logf: debugf(), Timeout: applyTimeout})
+		close(finished)
+		stop()
 		if err != nil {
 			var r *plan.Refusal
 			if errors.As(err, &r) {
@@ -84,6 +104,9 @@ Example:
 		}
 		if res.AccessToken != "" {
 			fmt.Printf("\n%s %s.\n", plan.Green("Applied:"), res.AccessToken)
+		}
+		if res.NFS != "" {
+			fmt.Printf("%s %s.\n", plan.Green("Applied:"), res.NFS)
 		}
 		if res.Action == "none" {
 			fmt.Printf("Release %s unchanged at revision %d.\n", p.ReleaseName, res.Revision)
@@ -128,5 +151,5 @@ func init() {
 	f.StringVar(&applyKubeconfig, "kubeconfig", "", "kubeconfig file (default: $KUBECONFIG, then ~/.kube/config)")
 	f.StringVar(&applyContext, "context", "", "kubeconfig context (default: the one the plan was made with); it must reach the planned cluster")
 	f.BoolVar(&applyYes, "yes", false, "apply without asking (for CI)")
-	f.DurationVar(&applyTimeout, "timeout", 10*time.Minute, "how long to follow the rollout after applying")
+	f.DurationVar(&applyTimeout, "timeout", 10*time.Minute, "how long to wait for the release's hooks (database migrations) and then for the rollout")
 }

@@ -59,6 +59,7 @@ func WatchRollout(ctx context.Context, t Target, namespace, release string, time
 		return RolloutResult{}, err
 	}
 	deadline := time.Now().Add(timeout)
+	stepf("watching the rollout of release %s every 3s, up to %s", release, timeout)
 	last := map[string]string{}
 	for {
 		ws, err := releaseWorkloads(ctx, c.clientset, namespace, release)
@@ -77,6 +78,7 @@ func WatchRollout(ctx context.Context, t Target, namespace, release string, time
 			done = done && w.Done()
 		}
 		if done {
+			stepf("rollout: all %d workloads updated and ready", len(ws))
 			return RolloutResult{Workloads: ws}, nil
 		}
 		if time.Now().After(deadline) {
@@ -199,4 +201,66 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// watchHooks, under --debug, reports while Helm waits on hook Jobs (the
+// database migrations): each Job's pods and what they wait on, whenever that
+// changes. Helm itself only says it is watching the Job. The returned
+// function stops it.
+func watchHooks(ctx context.Context, c *conn, ns string) func() {
+	if !Debugging() {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	go func() {
+		last := map[string]string{}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(10 * time.Second):
+			}
+			jobs, err := c.clientset.BatchV1().Jobs(ns).List(ctx, metav1.ListOptions{})
+			if err != nil {
+				continue
+			}
+			for _, j := range jobs.Items {
+				if j.Annotations["helm.sh/hook"] == "" || j.Status.Succeeded > 0 {
+					continue
+				}
+				pods, err := c.clientset.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{LabelSelector: "job-name=" + j.Name})
+				if err != nil {
+					continue
+				}
+				var states []string
+				for _, p := range pods.Items {
+					states = append(states, p.Name+" "+podWaitingOn(p))
+				}
+				msg := strings.Join(states, "; ")
+				if msg == "" {
+					msg = "no pods yet"
+				}
+				if last[j.Name] != msg {
+					last[j.Name] = msg
+					stepf("hook job %s: %s", j.Name, msg)
+				}
+			}
+		}
+	}()
+	return cancel
+}
+
+// podWaitingOn says what a pod is waiting for: unschedulable, an init
+// container still running, a container waiting with a reason.
+func podWaitingOn(p corev1.Pod) string {
+	if pr := podProblem(p); pr != "" {
+		return string(p.Status.Phase) + ": " + pr
+	}
+	for i, cs := range p.Status.InitContainerStatuses {
+		if cs.State.Terminated != nil && cs.State.Terminated.ExitCode == 0 {
+			continue
+		}
+		return fmt.Sprintf("Init:%d/%d, init container %s running", i, len(p.Status.InitContainerStatuses), cs.Name)
+	}
+	return string(p.Status.Phase)
 }

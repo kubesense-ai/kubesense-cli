@@ -154,6 +154,7 @@ func applyAccessToken(ctx context.Context, p *Plan, t Target, logf func(string, 
 	if err != nil {
 		return "", err
 	}
+	stepf("access token: %s (release %s at revision %d, planned from %d)", s.Action, AccessTokenRelease, st.Revision, s.BaselineRevision)
 	if st.Revision != s.BaselineRevision {
 		return "", refuse(StagePrecheck, RefuseAccessToken, "release %s is at revision %d, planned from %d", AccessTokenRelease, st.Revision, s.BaselineRevision)
 	}
@@ -202,6 +203,11 @@ func (p *Plan) showAccessToken(w io.Writer) {
 		}
 		fmt.Fprintf(w, Bold("Access:  ")+" access token present, key %s%s; unchanged\n", MaskKeyID(st.KeyID), when)
 	default:
-		fmt.Fprintf(w, Bold("Access:  ")+" no access token installed: fine when images come from your own registry; add one with --access-token-file\n")
+		fmt.Fprintf(w, Bold("Access:  ")+" no access token installed: fine when images come from your own registry; add one with --access-token\n")
 	}
+}
+
+// EncodeAccessToken builds the token KubeSense issues from its two parts.
+func EncodeAccessToken(id, secret string) string {
+	return base64.StdEncoding.EncodeToString([]byte(id + ":" + secret))
 }

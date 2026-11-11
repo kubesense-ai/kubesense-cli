@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"time"
 
 	"helm.sh/helm/v3/pkg/action"
@@ -21,7 +22,9 @@ import (
 	"helm.sh/helm/v3/pkg/chart/loader"
 	"helm.sh/helm/v3/pkg/chartutil"
 	"helm.sh/helm/v3/pkg/cli"
+	"helm.sh/helm/v3/pkg/getter"
 	"helm.sh/helm/v3/pkg/release"
+	"helm.sh/helm/v3/pkg/repo"
 	"helm.sh/helm/v3/pkg/storage/driver"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -103,6 +106,8 @@ type Plan struct {
 	// installs or rotates it when a token was given.
 	AccessTokenState AccessTokenState `json:"accessTokenState"`
 	AccessToken      *AccessTokenStep `json:"accessToken,omitempty"`
+	NFSState         NFSState         `json:"nfsState"`
+	NFS              *NFSStep         `json:"nfs,omitempty"`
 }
 
 // ChartRef pins the chart artifact.
@@ -167,6 +172,10 @@ type Options struct {
 	// AccessTokenChart overrides the chart (a path, or a name in ChartRepo).
 	AccessToken      string
 	AccessTokenChart string
+	// NFS installs the bundled NFS server (when absent) and points the
+	// enabled NFS features at it. NFSChart overrides the chart.
+	NFS      bool
+	NFSChart string
 
 	// AllowImpureTemplates skips the pure-render lint. Spike/test only: it
 	// exists to demonstrate what the execution-boundary check catches on its own.
@@ -221,14 +230,36 @@ func mergeMaps(a, b map[string]interface{}) map[string]interface{} {
 // resolveChart returns a local path for the chart: o.ChartPath itself when it
 // exists, otherwise the chart of that name downloaded from o.ChartRepo.
 func resolveChart(o Options) (string, error) {
-	if _, err := os.Stat(o.ChartPath); err == nil {
-		return filepath.Abs(o.ChartPath)
+	// A local chart is an archive or a directory with a Chart.yaml. Any other
+	// directory that happens to share the name (kube-devops has an nfs/
+	// directory next to charts/) is not one: a bare name then goes to the repo.
+	if fi, err := os.Stat(o.ChartPath); err == nil {
+		if !fi.IsDir() {
+			stepf("chart %s: local archive", o.ChartPath)
+			return filepath.Abs(o.ChartPath)
+		}
+		if _, err := os.Stat(filepath.Join(o.ChartPath, "Chart.yaml")); err == nil {
+			stepf("chart %s: local directory", o.ChartPath)
+			return filepath.Abs(o.ChartPath)
+		}
+		if strings.ContainsRune(o.ChartPath, filepath.Separator) || o.ChartRepo == "" {
+			return "", fmt.Errorf("chart %q: directory has no Chart.yaml", o.ChartPath)
+		}
 	}
 	if o.ChartRepo == "" {
 		return "", fmt.Errorf("chart %q: no such file or directory, and no chart repository given", o.ChartPath)
 	}
-	cpo := action.ChartPathOptions{RepoURL: o.ChartRepo, Version: o.ChartVersion}
-	path, err := cpo.LocateChart(o.ChartPath, cli.New())
+	// Resolve the name in the repo to its URL first: Helm's LocateChart would
+	// otherwise take a same-named local directory.
+	settings := cli.New()
+	stepf("chart %s %s: looking it up in %s", o.ChartPath, o.ChartVersion, o.ChartRepo)
+	url, err := repo.FindChartInRepoURL(o.ChartRepo, o.ChartPath, o.ChartVersion, "", "", "", getter.All(settings))
+	if err != nil {
+		return "", fmt.Errorf("fetch chart %s %s from %s: %w", o.ChartPath, o.ChartVersion, o.ChartRepo, err)
+	}
+	cpo := action.ChartPathOptions{Version: o.ChartVersion}
+	stepf("downloading %s", url)
+	path, err := cpo.LocateChart(url, settings)
 	if err != nil {
 		return "", fmt.Errorf("fetch chart %s %s from %s: %w", o.ChartPath, o.ChartVersion, o.ChartRepo, err)
 	}
@@ -264,6 +295,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	stepf("loaded chart %s-%s, digest %s", chrt.Name(), chrt.Metadata.Version, shortHash(digest))
 	var warnings []string
 	if err := CheckNoCRDs(chrt); err != nil {
 		if o.Strict {
@@ -275,9 +307,17 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	var files []string
+	for _, f := range append([]string{o.OverridesFile}, o.OverridesFiles...) {
+		if f != "" {
+			files = append(files, f)
+		}
+	}
+	stepf("read %d values file(s), later ones win: %s", len(files), strings.Join(files, ", "))
 	if overrides, err = withSuppliedValues(overrides); err != nil {
 		return nil, err
 	}
+	stepf("checking the chart for generated secrets, certificates and cluster lookups")
 	pure := "enforced"
 	if o.AllowImpureTemplates {
 		pure = "skipped"
@@ -304,10 +344,16 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		return nil, err
 	}
 	c.helm.Capabilities = caps
+	stepf("cluster: kube %s, %d API versions", caps.KubeVersion.Version, len(caps.APIVersions))
 
 	bl, cur, err := c.readBaseline(ctx, o.ReleaseName, o.Namespace)
 	if err != nil {
 		return nil, err
+	}
+	if bl.Revision == 0 {
+		stepf("release %s: %s (not installed yet)", o.ReleaseName, bl.State)
+	} else {
+		stepf("release %s: %s, revision %d (%s)", o.ReleaseName, bl.State, bl.Revision, bl.Status)
 	}
 	if bl.State == StateGitOps {
 		if o.Strict {
@@ -319,15 +365,22 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	nfsState, nfsStep, err := c.planNFS(ctx, o, overrides)
+	if err != nil {
+		return nil, err
+	}
+	warnings = append(warnings, sharedStorageWarnings(overrides, o.NFS)...)
 	clusterID, err := c.clusterID(ctx)
 	if err != nil {
 		return nil, err
 	}
 
+	stepf("cluster ID %s; rendering with Helm (dry run, nothing is written)", clusterID)
 	rel, err := c.dryRun(o.ReleaseName, o.Namespace, bl, chrt, overrides)
 	if err != nil {
 		return nil, fmt.Errorf("render: %w", err)
 	}
+	stepf("rendered %d bytes of manifests and %d hooks", len(rel.Manifest), len(rel.Hooks))
 
 	p := &Plan{
 		FormatVersion: FormatVersion,
@@ -355,6 +408,8 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 
 		AccessTokenState: tokenState,
 		AccessToken:      tokenStep,
+		NFSState:         nfsState,
+		NFS:              nfsStep,
 	}
 	p.ExpiresAt = p.CreatedAt.Add(o.TTL)
 	if bl.State != StateFresh {

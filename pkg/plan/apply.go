@@ -60,6 +60,10 @@ type ApplyOptions struct {
 	Target Target
 	Logf   func(string, ...interface{})
 	Now    func() time.Time
+	// Timeout bounds how long Helm waits for hooks (the database migration
+	// job). Without it Helm waits forever, and an interrupted wait leaves the
+	// release pending. Default 10 minutes.
+	Timeout time.Duration
 
 	// --- spike/test-only knobs (unexported: not reachable from the CLI) ---
 	skipDigestCheck bool   // prove the render-hash checks catch what the digest check would
@@ -83,6 +87,8 @@ type ApplyResult struct {
 	LiveChecks       int
 	// AccessToken says what the access-token step did; empty when nothing.
 	AccessToken string
+	// NFS says what the NFS step did; empty when nothing.
+	NFS string
 }
 
 // Apply executes the plan only if its inputs still hold; otherwise it returns
@@ -109,6 +115,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if p.CLIVersion != Version {
 		return nil, refuse(StagePrecheck, RefuseCLIVersion, "plan made by kubesense %s, this is %s", p.CLIVersion, Version)
 	}
+	stepf("plan %s: made %s by kubesense %s, expires %s", p.Action, p.CreatedAt.Local().Format("15:04:05"), p.CLIVersion, p.ExpiresAt.Local().Format("15:04:05"))
 	if p.HelmVersion != HelmVersion() {
 		return nil, refuse(StagePrecheck, RefuseHelmVersion, "plan rendered with Helm %s, embedded Helm is %s", p.HelmVersion, HelmVersion())
 	}
@@ -124,6 +131,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if digest != p.Chart.Digest && !o.skipDigestCheck {
 		return nil, refuse(StagePrecheck, RefuseChartDigest, "chart digest %s != planned %s", shortHash(digest), shortHash(p.Chart.Digest))
 	}
+	stepf("chart %s-%s digest %s matches the plan", p.Chart.Name, p.Chart.Version, shortHash(digest))
 	if p.Baseline.State == StateGitOps {
 		return nil, refuse(StagePrecheck, RefuseGitOps, "the release is managed by Argo CD or Flux: change its values in Git")
 	}
@@ -162,6 +170,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 		if id != p.ClusterID {
 			return nil, refuse(StagePrecheck, RefuseTarget, "plan was made against cluster %s, this is cluster %s", p.ClusterID, id)
 		}
+		stepf("cluster ID %s matches the plan", id)
 	}
 
 	// 2. Render inputs: fetch Capabilities, compare, then PIN them so the real
@@ -176,6 +185,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 			caps.KubeVersion.Version, len(caps.APIVersions), p.Capabilities.KubeVersion, p.Capabilities.APICount)
 	}
 	c.helm.Capabilities = caps
+	stepf("cluster APIs unchanged since plan (kube %s, %d API versions)", caps.KubeVersion.Version, len(caps.APIVersions))
 
 	// 3 + 4. Baselines (early, cheap refusal; repeated at the boundary).
 	if err := c.checkBaselines(ctx, p, StagePrecheck); err != nil {
@@ -192,9 +202,18 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !p.HasReleaseChanges() {
+	// Then the NFS server, whose IP goes into the values.
+	nfsNote, err := applyNFS(ctx, p, o.Target, overrides, o.Logf)
+	if err != nil {
+		return &ApplyResult{AccessToken: tokenNote}, err
+	}
+	if !p.HasReleaseChanges() && nfsNote == "" {
 		return &ApplyResult{Action: "none", Revision: p.Baseline.Revision, Status: p.Baseline.Status, AccessToken: tokenNote}, nil
 	}
+
+	stepf("running Helm %s of %s (hooks and migrations wait up to %s)", p.Action, p.ReleaseName, o.timeout())
+	stopWatch := watchHooks(ctx, c, p.Namespace)
+	defer stopWatch()
 
 	// 5. Execute. The post-renderer checks the non-hook manifests inside the
 	// real render; the gate checks manifests + hooks + baselines at the first
@@ -215,18 +234,20 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 		in.ReleaseName, in.Namespace = p.ReleaseName, p.Namespace
 		in.PostRenderer = pr
 		in.CreateNamespace = false // namespace is a precondition, not part of the plan
+		in.Timeout = o.timeout()
 		rel, err = in.RunWithContext(ctx, chrt, overrides)
 	case "upgrade":
 		up := action.NewUpgrade(c.helm)
 		up.Namespace = p.Namespace
 		up.PostRenderer = pr
 		up.ResetValues = true
+		up.Timeout = o.timeout()
 		up.MaxHistory = 0 // pruning would delete records before the gated Create (storage.go:62)
 		rel, err = up.RunWithContext(ctx, p.ReleaseName, chrt, overrides)
 	default:
 		return nil, fmt.Errorf("unknown plan action %q", p.Action)
 	}
-	res := &ApplyResult{Action: p.Action, AccessToken: tokenNote}
+	res := &ApplyResult{Action: p.Action, AccessToken: tokenNote, NFS: nfsNote}
 	if gate.opened || gate.err != nil {
 		res.LiveChecks = len(p.LiveObjects)
 	}
@@ -252,6 +273,13 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	return res, nil
 }
 
+func (o ApplyOptions) timeout() time.Duration {
+	if o.Timeout > 0 {
+		return o.Timeout
+	}
+	return 10 * time.Minute
+}
+
 func (c *conn) checkBaselines(ctx context.Context, p *Plan, stage string) error {
 	bl, _, err := c.readBaseline(ctx, p.ReleaseName, p.Namespace)
 	if err != nil {
@@ -264,6 +292,7 @@ func (c *conn) checkBaselines(ctx context.Context, p *Plan, stage string) error 
 	if bl.DeploymentInfoHash != p.Baseline.DeploymentInfoHash {
 		return refuse(stage, RefuseDeploymentInfo, "%s changed since plan", DeploymentInfoSecret)
 	}
+	stepf("%s: release %s still at revision %d %s, as planned", stage, p.ReleaseName, bl.Revision, bl.Status)
 	if _, err := c.recheckLive(ctx, p.LiveObjects); err != nil {
 		var lb *LiveBaselineError
 		if errors.As(err, &lb) {

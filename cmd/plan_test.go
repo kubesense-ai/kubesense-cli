@@ -101,6 +101,29 @@ func TestPlanShowValuesCommands(t *testing.T) {
 	if _, err := cs.CoreV1().ConfigMaps("kubesense").Get(context.Background(), "ks-config", metav1.GetOptions{}); err == nil {
 		t.Fatal("plan wrote to the cluster")
 	}
+	// --debug prints the CLI's steps and Helm's log, on stderr only.
+	{
+		r, w, _ := os.Pipe()
+		stderr := os.Stderr
+		os.Stderr = w
+		out, err := run("plan", "--chart", chart, "--release", "ks", "-f", overrides, "--debug")
+		w.Close()
+		os.Stderr = stderr
+		debug = false // cobra keeps flag values between Execute calls
+		logs, _ := io.ReadAll(r)
+		var ee *exitError
+		if err != nil && !errors.As(err, &ee) {
+			t.Fatalf("plan --debug: %v", err)
+		}
+		for _, want := range []string{"[step", "loaded chart app-", "release ks: fresh", "rendering with Helm", "recorded the live state"} {
+			if !strings.Contains(string(logs), want) {
+				t.Fatalf("--debug output lacks %q:\n%s", want, logs)
+			}
+		}
+		if strings.Contains(out, "[step") {
+			t.Fatal("debug lines must go to stderr, not stdout")
+		}
+	}
 	for _, gone := range []string{"install", "uninstall"} {
 		if _, err := run(gone); err == nil {
 			t.Fatalf("%s must not be a command: changes go through plan and apply", gone)
