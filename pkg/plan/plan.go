@@ -98,6 +98,11 @@ type Plan struct {
 	// be applied.
 	Strict   bool     `json:"strict,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
+
+	// The optional access-token release: what was found, and the step that
+	// installs or rotates it when a token was given.
+	AccessTokenState AccessTokenState `json:"accessTokenState"`
+	AccessToken      *AccessTokenStep `json:"accessToken,omitempty"`
 }
 
 // ChartRef pins the chart artifact.
@@ -156,6 +161,12 @@ type Options struct {
 	// instead of warning about them. Apply needs a strict plan; review (the
 	// CLI's plan command) does not.
 	Strict bool
+
+	// AccessToken, when set, is the token (as issued: base64 of
+	// KEY_ID:KEY_SECRET) to install or rotate in the access-token release.
+	// AccessTokenChart overrides the chart (a path, or a name in ChartRepo).
+	AccessToken      string
+	AccessTokenChart string
 
 	// AllowImpureTemplates skips the pure-render lint. Spike/test only: it
 	// exists to demonstrate what the execution-boundary check catches on its own.
@@ -264,6 +275,9 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	if overrides, err = withSuppliedValues(overrides); err != nil {
+		return nil, err
+	}
 	pure := "enforced"
 	if o.AllowImpureTemplates {
 		pure = "skipped"
@@ -277,7 +291,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		if errors.As(err, &le) {
 			n = len(le.Findings)
 		}
-		warnings = append(warnings, fmt.Sprintf("the chart is not pure-render (%d template findings: lookup, random or time functions): some values, such as generated passwords and certificates, can differ between this plan and the real run", n))
+		warnings = append(warnings, fmt.Sprintf("the chart generates passwords and certificates or reads the cluster (%d places), so apply checks this plan's inputs, not its exact render", n))
 	}
 
 	readOnly := newGate(func(*release.Release) error { return errors.New("plan is read-only") })
@@ -300,6 +314,10 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 			return nil, errors.New("baseline is GitOps-managed (Argo CD / Flux metadata present): use `render` for review; apply is not supported")
 		}
 		warnings = append(warnings, "this release is managed by Argo CD or Flux: change values in Git, not with helm; this plan is for review only")
+	}
+	tokenState, tokenStep, err := c.planAccessToken(o)
+	if err != nil {
+		return nil, err
 	}
 	clusterID, err := c.clusterID(ctx)
 	if err != nil {
@@ -334,6 +352,9 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 		Hooks:         hookRecords(rel.Hooks),
 		Strict:        o.Strict,
 		Warnings:      warnings,
+
+		AccessTokenState: tokenState,
+		AccessToken:      tokenStep,
 	}
 	p.ExpiresAt = p.CreatedAt.Add(o.TTL)
 	if bl.State != StateFresh {
@@ -387,7 +408,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	}
 
 	p.Changes = append(diffObjects(current, target, false), diffObjects(shownCurrent, shownTarget, true)...)
-	p.ValueChanges = maskValuePaths(diffPaths(bl.CurrentOverrides, overrides, "", 50))
+	p.ValueChanges = maskValuePaths(diffPaths(StripSuppliedValues(bl.CurrentOverrides), StripSuppliedValues(overrides), "", 50))
 	return p, nil
 }
 

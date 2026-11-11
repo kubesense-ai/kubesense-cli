@@ -18,6 +18,8 @@ var (
 	planKubeconfig, planContext, planNamespace, planRelease string
 	planChart, planChartVersion, planChartRepo, planOut     string
 	planValues                                              []string
+	planStrict                                              bool
+	planAccessTokenFile, planAccessTokenChart               string
 	planTTL                                                 time.Duration
 	planDetailedExitCode                                    bool
 )
@@ -36,10 +38,22 @@ Credentials are masked in the output.
 Start from your overrides, not from effective values:
   kubesense values pull -n kubesense --release kubesense -o overrides.yaml
 
+The access token (image pulls from KubeSense's registry) is optional: give
+--access-token-file to install or rotate it in the same plan. Without it the
+plan only reports whether one is installed.
+
 Examples:
   kubesense plan --chart kubesense-server --version 2.3.9 -f overrides.yaml
   kubesense plan --chart ./charts/kubesense-server -f base.yaml -f prod.yaml --out upgrade.plan`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		var token string
+		if planAccessTokenFile != "" {
+			t, err := plan.ReadAccessToken(planAccessTokenFile, os.Stdin)
+			if err != nil {
+				return fmt.Errorf("access token: %w", err)
+			}
+			token = t
+		}
 		p, err := plan.MakePlan(context.Background(), plan.Options{
 			Target:      plan.Target{Kubeconfig: planKubeconfig, Context: planContext},
 			ReleaseName: planRelease, Namespace: planNamespace,
@@ -47,6 +61,9 @@ Examples:
 			OverridesFiles: planValues,
 			TTL:            planTTL,
 			Speculative:    planOut == "",
+			Strict:         planStrict,
+			Logf:           debugf(),
+			AccessToken:    token, AccessTokenChart: planAccessTokenChart,
 		})
 		if err != nil {
 			return err
@@ -56,7 +73,7 @@ Examples:
 			if err := p.Save(planOut); err != nil {
 				return err
 			}
-			fmt.Printf("\nSaved the plan to %s. It contains your overrides, including any credentials: it is readable only by you, keep it out of Git. Review it with: kubesense show %s\n", planOut, planOut)
+			fmt.Printf("\nSaved the plan to %s. It contains your overrides, including any credentials: it is readable only by you, keep it out of Git.\nReview it with: kubesense show %s\nApply it with:  kubesense apply %s\n", planOut, planOut, planOut)
 		}
 		if planDetailedExitCode && p.HasChanges() {
 			return &exitError{code: 2}
@@ -91,6 +108,9 @@ func init() {
 	f.StringArrayVarP(&planValues, "values", "f", nil, "values file with your overrides; repeat to merge, later files win")
 	f.StringVar(&planOut, "out", "", "save the plan to this file (readable only by you)")
 	f.DurationVar(&planTTL, "ttl", time.Hour, "how long a saved plan stays valid")
+	f.BoolVar(&planStrict, "strict", false, "refuse charts that generate secrets, certificates or read the cluster, so apply can check the exact render (the KubeSense chart does all three)")
+	f.StringVar(&planAccessTokenFile, "access-token-file", "", "install or rotate the image-pull access token from this file (\"-\" reads stdin); not needed when images come from your own registry")
+	f.StringVar(&planAccessTokenChart, "access-token-chart", "", "access-token chart: a local path, or a name in --repo (default: access-token)")
 	f.BoolVar(&planDetailedExitCode, "detailed-exitcode", false, "exit 0 with no changes, 2 with changes, 1 on error")
 	_ = planCmd.MarkFlagRequired("chart")
 }

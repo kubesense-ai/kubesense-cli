@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 
+	"kubesense-cli/pkg/plan"
+
 	"github.com/spf13/cobra"
 	"helm.sh/helm/v3/pkg/action"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
@@ -43,6 +45,11 @@ For Argo CD or Flux installs, your values live in Git; use those instead.`,
 			return err
 		}
 		vals, err := action.NewGetValues(cfg).Run(valuesRelease)
+		// The copy of your values plan attaches to the release is derived:
+		// pulling it would nest it inside the next copy.
+		if err == nil {
+			vals = plan.StripSuppliedValues(vals)
+		}
 		if err != nil {
 			return fmt.Errorf("release %s in %s: %w", valuesRelease, valuesNamespace, err)
 		}

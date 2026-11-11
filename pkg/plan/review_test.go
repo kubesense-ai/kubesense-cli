@@ -3,7 +3,6 @@ package plan
 import (
 	"bytes"
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -47,8 +46,8 @@ func TestReviewPlanMasksCredentialsAndShowsTheRest(t *testing.T) {
 		`data.message: "a" -> "b"`,                       // ordinary setting shown
 		"data.apiToken: (sensitive value changed)",       // credential-like key masked
 		"stringData.password: (sensitive value changed)", // any Secret data masked
-		"dbPassword: (sensitive value changed)",          // overrides diff masked
-		`message: "a" -> "b"`,
+		"~ dbPassword  (sensitive value changed)",        // your values masked
+		"~ message  a → b",
 		"cluster ID ",
 	} {
 		if !strings.Contains(text, want) {
@@ -61,17 +60,11 @@ func TestReviewPlanMasksCredentialsAndShowsTheRest(t *testing.T) {
 		t.Fatalf("upgrade plan lists a pre-install hook:\n%s", text)
 	}
 	// The chart calls randAlphaNum: review mode warns instead of refusing.
-	if p.PureRender != "warned" || len(p.Warnings) == 0 || !strings.Contains(p.Warnings[0], "not pure-render") {
+	if p.PureRender != "warned" || len(p.Warnings) == 0 || !strings.Contains(p.Warnings[0], "not its exact render") {
 		t.Fatalf("want a pure-render warning, got %q / %v", p.PureRender, p.Warnings)
 	}
 	if !p.HasChanges() {
 		t.Fatal("HasChanges = false for a plan with changes")
-	}
-	// A review plan can never be applied.
-	_, err := Apply(context.Background(), p, ApplyOptions{Target: testTarget})
-	var r *Refusal
-	if !errors.As(err, &r) || r.Code != "not-strict" {
-		t.Fatalf("apply of a review plan: want not-strict refusal, got %v", err)
 	}
 }
 

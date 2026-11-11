@@ -28,6 +28,7 @@ const (
 	RefuseManifests       = "rendered-manifests"
 	RefuseHooks           = "rendered-hooks"
 	RefuseWriteBarrier    = "write-before-validation"
+	RefuseGitOps          = "gitops"
 )
 
 // Stages at which apply can refuse.
@@ -80,14 +81,21 @@ type ApplyResult struct {
 	ValidateDuration time.Duration
 	BoundaryToWrite  time.Duration
 	LiveChecks       int
+	// AccessToken says what the access-token step did; empty when nothing.
+	AccessToken string
 }
 
-// Apply executes the plan only if the invariant holds; otherwise it returns a
-// *Refusal and nothing (no release record, no resource) has been written.
+// Apply executes the plan only if its inputs still hold; otherwise it returns
+// a *Refusal and nothing (no release record, no resource) has been written.
+//
+// Every plan is checked for the same inputs: target cluster, chart digest,
+// overrides (taken from the plan, never from disk), cluster Capabilities, the
+// release revision and the live objects the chart reads. A strict plan is also
+// checked for exactly the rendered manifests and hooks it showed; a plan of a
+// chart that generates passwords, certificates or reads the cluster (lookup)
+// cannot promise that, so it is checked on inputs only.
 func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
-	if !p.Strict {
-		return nil, refuse("precheck", "not-strict", "the plan was made for review, not with --strict; it cannot be applied")
-	}
+	exact := p.Strict
 	now := time.Now
 	if o.Now != nil {
 		now = o.Now
@@ -116,11 +124,14 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	if digest != p.Chart.Digest && !o.skipDigestCheck {
 		return nil, refuse(StagePrecheck, RefuseChartDigest, "chart digest %s != planned %s", shortHash(digest), shortHash(p.Chart.Digest))
 	}
+	if p.Baseline.State == StateGitOps {
+		return nil, refuse(StagePrecheck, RefuseGitOps, "the release is managed by Argo CD or Flux: change its values in Git")
+	}
 	overrides, err := roundTrip(p.Overrides)
 	if err != nil {
 		return nil, err
 	}
-	if p.PureRender == "enforced" {
+	if exact && p.PureRender == "enforced" {
 		if err := LintPureRender(chrt, overrides); err != nil {
 			return nil, &Refusal{Stage: StagePrecheck, Code: RefuseImpure, Err: err}
 		}
@@ -132,7 +143,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 		if o.gateOff {
 			return nil
 		}
-		return c.validateCandidate(ctx, p, rel)
+		return c.validateCandidate(ctx, p, rel, exact)
 	})
 	c, err = o.Target.connect(p.Namespace, gate, o.Logf)
 	if err != nil {
@@ -140,6 +151,17 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	}
 	if c.serverURL != p.ServerURL {
 		return nil, refuse(StagePrecheck, RefuseTarget, "plan was made against %s, kubeconfig points at %s", p.ServerURL, c.serverURL)
+	}
+	if p.ClusterID != "" {
+		id, err := c.clusterID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		// The same API address can front another cluster (a rebuilt cluster, a
+		// load balancer, a tunnel): kube-system's UID tells them apart.
+		if id != p.ClusterID {
+			return nil, refuse(StagePrecheck, RefuseTarget, "plan was made against cluster %s, this is cluster %s", p.ClusterID, id)
+		}
 	}
 
 	// 2. Render inputs: fetch Capabilities, compare, then PIN them so the real
@@ -164,10 +186,23 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 		o.beforeExecute()
 	}
 
+	// The access token first, so a new pull secret exists before pods roll.
+	// If it fails, the KubeSense release is not touched.
+	tokenNote, err := applyAccessToken(ctx, p, o.Target, o.Logf)
+	if err != nil {
+		return nil, err
+	}
+	if !p.HasReleaseChanges() {
+		return &ApplyResult{Action: "none", Revision: p.Baseline.Revision, Status: p.Baseline.Status, AccessToken: tokenNote}, nil
+	}
+
 	// 5. Execute. The post-renderer checks the non-hook manifests inside the
 	// real render; the gate checks manifests + hooks + baselines at the first
 	// write; the barrier refuses any write before that.
 	pr := &checkingPostRenderer{check: func(m string) error {
+		if !exact {
+			return nil
+		}
 		if h := ManifestHash(m); h != p.ManifestHash {
 			return refuse(StagePostRender, RefuseManifests, "rendered manifests %s != planned %s", shortHash(h), shortHash(p.ManifestHash))
 		}
@@ -191,7 +226,7 @@ func Apply(ctx context.Context, p *Plan, o ApplyOptions) (*ApplyResult, error) {
 	default:
 		return nil, fmt.Errorf("unknown plan action %q", p.Action)
 	}
-	res := &ApplyResult{Action: p.Action}
+	res := &ApplyResult{Action: p.Action, AccessToken: tokenNote}
 	if gate.opened || gate.err != nil {
 		res.LiveChecks = len(p.LiveObjects)
 	}
@@ -242,10 +277,13 @@ func (c *conn) checkBaselines(ctx context.Context, p *Plan, stage string) error 
 // validateCandidate runs inside the gate, i.e. after Helm has rendered the real
 // execution (manifests post-rendered, hooks sorted) and immediately before its
 // first write. rel is the exact object Helm is about to persist and execute.
-func (c *conn) validateCandidate(ctx context.Context, p *Plan, rel *release.Release) error {
+func (c *conn) validateCandidate(ctx context.Context, p *Plan, rel *release.Release, exact bool) error {
 	want := p.Baseline.Revision + 1
 	if rel.Version != want {
 		return refuse(StageBoundary, RefuseRevision, "candidate revision %d, planned %d", rel.Version, want)
+	}
+	if !exact {
+		return c.checkBaselines(ctx, p, StageBoundary)
 	}
 	if h := ManifestHash(rel.Manifest); h != p.ManifestHash {
 		return refuse(StageBoundary, RefuseManifests, "candidate manifests %s != planned %s", shortHash(h), shortHash(p.ManifestHash))
