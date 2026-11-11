@@ -30,4 +30,4 @@ jobs:
           version: ~> 1.18
           args: release --clean
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # the run's own token; contents: write above is all a release needs
