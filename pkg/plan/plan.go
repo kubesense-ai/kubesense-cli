@@ -329,6 +329,7 @@ func MakePlan(ctx context.Context, o Options) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
+	warnings = append(warnings, sharedStorageWarnings(overrides, o.NFS)...)
 	clusterID, err := c.clusterID(ctx)
 	if err != nil {
 		return nil, err

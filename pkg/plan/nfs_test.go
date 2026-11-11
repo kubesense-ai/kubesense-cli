@@ -96,3 +96,27 @@ func TestNFSNeedsAFeatureAndNoStrict(t *testing.T) {
 	var r *Refusal
 	_ = errors.As(err, &r)
 }
+
+func TestSharedStorageWarnings(t *testing.T) {
+	on := func(extra map[string]interface{}) map[string]interface{} {
+		f := map[string]interface{}{"enabled": true}
+		for k, v := range extra {
+			f[k] = v
+		}
+		return map[string]interface{}{"global": map[string]interface{}{"dynamicLogParsing": f}}
+	}
+	if w := sharedStorageWarnings(on(nil), false); len(w) != 1 || !strings.Contains(w[0], "add --nfs") {
+		t.Fatalf("want a warning, got %v", w)
+	}
+	for _, v := range []map[string]interface{}{
+		on(map[string]interface{}{"nfs": map[string]interface{}{"host": "10.0.0.5"}}),
+		on(map[string]interface{}{"filesystem": map[string]interface{}{"enabled": true}}),
+	} {
+		if w := sharedStorageWarnings(v, false); len(w) != 0 {
+			t.Fatalf("storage given, want no warning: %v", w)
+		}
+	}
+	if w := sharedStorageWarnings(on(nil), true); len(w) != 0 {
+		t.Fatalf("--nfs given: %v", w)
+	}
+}

@@ -230,3 +230,23 @@ func (p *Plan) showNFS(w io.Writer) {
 		fmt.Fprintf(w, "%s NFS server present (release %s, %s)\n", Bold("NFS:     "), NFSRelease, st.Host)
 	}
 }
+
+// sharedStorageWarnings flags an NFS feature that is on with nothing behind
+// it: no --nfs, no nfs.host and no ReadWriteMany filesystem.
+func sharedStorageWarnings(overrides map[string]interface{}, nfs bool) []string {
+	var out []string
+	for _, f := range nfsFeatures {
+		fm := getMap(overrides, "global", f)
+		if on, _ := fm["enabled"].(bool); !on || nfs {
+			continue
+		}
+		if fs, _ := getMap(fm, "filesystem")["enabled"].(bool); fs {
+			continue
+		}
+		if h, _ := getMap(fm, "nfs")["host"].(string); h != "" {
+			continue
+		}
+		out = append(out, fmt.Sprintf("global.%s is on but has no shared storage: add --nfs to install the NFS server, or set global.%s.filesystem (a ReadWriteMany class such as EFS) or global.%s.nfs.host", f, f, f))
+	}
+	return out
+}
