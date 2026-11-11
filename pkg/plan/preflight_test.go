@@ -213,3 +213,10 @@ func TestDiskEncryption(t *testing.T) {
 		}
 	}
 }
+
+func TestEncodeAccessTokenRoundTrip(t *testing.T) {
+	id, sec, err := ParseAccessToken(EncodeAccessToken("AKIAEXAMPLE", "s3cr:et"))
+	if err != nil || id != "AKIAEXAMPLE" || sec != "s3cr:et" {
+		t.Fatalf("%q %q %v", id, sec, err)
+	}
+}
