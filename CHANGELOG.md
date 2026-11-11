@@ -1,3 +1,38 @@
+## [0.1.6](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.5...v0.1.6) (2024-10-22)
+
+
+### Performance Improvements
+
+* **semver:** Add npm based semver release ([322463f](https://github.com/kubesense-ai/kubesense-cli/commit/322463f5699086e848bcd0885777562a0773b5b3))
+
+## [0.1.5](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.4...v0.1.5) (2024-10-22)
+
+
+### Bug Fixes
+
+* **semver:** Update env to GITHUB_TOKEN ([c6da38b](https://github.com/kubesense-ai/kubesense-cli/commit/c6da38b7221ebe007de2b03f5e5c1f1a094d01c5))
+
+## [0.1.4](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.3...v0.1.4) (2024-10-22)
+
+
+### Bug Fixes
+
+* **semver:** job name of semver workflow updated ([7b38f2f](https://github.com/kubesense-ai/kubesense-cli/commit/7b38f2f937d862304b5380316cc6cdc7f1c10a8e))
+
+## [0.1.3](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.2...v0.1.3) (2024-10-21)
+
+
+### Bug Fixes
+
+* **semver:** tags workflow not getting triggered ([5abe0c5](https://github.com/kubesense-ai/kubesense-cli/commit/5abe0c51141dc61f9a737c32583f4d2c8791cecd))
+
+## [0.1.2](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.1...v0.1.2) (2024-10-21)
+
+
+### Bug Fixes
+
+* **semver:** Fix semver autoversioning ([0467752](https://github.com/kubesense-ai/kubesense-cli/commit/0467752bb8e7f736a2bc7211a714e729ac77cdd7))
+
 ## [0.1.2](https://github.com/kubesense-ai/kubesense-cli/compare/v0.1.1...v0.1.2) (2024-10-21)
 
 
