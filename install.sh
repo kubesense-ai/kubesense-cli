@@ -18,7 +18,7 @@ ARCH=$(uname -m)
 # Define the binary name and the directory to install it to
 BINARY_NAME="kubesense"
 BINARY_BASE_URL=https://github.com/kubesense-ai/kubesense-cli/releases/latest/download
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${KUBESENSE_INSTALL_DIR:-/usr/local/bin}"
 PLATFORM=""
 # Detect OS and architecture
 case "$OS" in
@@ -59,26 +59,37 @@ BINARY_URL="$BINARY_BASE_URL/$BINARY_NAME$PLATFORM"
 echo "Detected OS: $OS, Architecture: $ARCH"
 echo "Downloading binary from: $BINARY_URL"
 
-# Download the binary
-curl -L -o $BINARY_NAME.tar.gz  "$BINARY_URL" && tar -zxvf $BINARY_NAME.tar.gz
-if [ $? -ne 0 ]; then
-  echo "Failed to download binary"
-  exit 1
-fi
+fail() { echo "Error: $*" >&2; exit 1; }
 
-# Make the binary executable
-chmod +x "$BINARY_NAME"
+# Work in a temp directory so nothing depends on (or litters) the current one.
+TMP_DIR=$(mktemp -d) || fail "cannot create a temp directory"
+trap 'rm -rf "$TMP_DIR"' EXIT
 
-# Move the binary to the installation directory
+curl -fL -o "$TMP_DIR/$BINARY_NAME.tar.gz" "$BINARY_URL" || fail "download failed: $BINARY_URL"
+tar -xzf "$TMP_DIR/$BINARY_NAME.tar.gz" -C "$TMP_DIR" "$BINARY_NAME" || fail "could not unpack $BINARY_NAME from the archive"
+chmod +x "$TMP_DIR/$BINARY_NAME"
+
+# Use sudo only when needed. New Apple Silicon Macs have no /usr/local/bin, so create it.
+SUDO=""
+EXISTING="$INSTALL_DIR"
+while [ ! -d "$EXISTING" ]; do EXISTING=$(dirname "$EXISTING"); done
+[ -w "$EXISTING" ] || SUDO="sudo"
 echo "Installing $BINARY_NAME to $INSTALL_DIR"
-sudo mv "$BINARY_NAME" "$INSTALL_DIR/"
-rm "$BINARY_NAME".tar.gz
+$SUDO mkdir -p "$INSTALL_DIR" || fail "cannot create $INSTALL_DIR"
+$SUDO install -m 0755 "$TMP_DIR/$BINARY_NAME" "$INSTALL_DIR/$BINARY_NAME" || fail "cannot install to $INSTALL_DIR"
 
-# Add to PATH if not already
-if ! echo "$PATH" | grep -q "$INSTALL_DIR"; then
-  echo "Adding $INSTALL_DIR to PATH"
-  echo "export PATH=\$PATH:$INSTALL_DIR" >> ~/.bashrc
-  source ~/.bashrc
+# Only claim success once the installed binary actually runs.
+"$INSTALL_DIR/$BINARY_NAME" version >/dev/null 2>&1 || fail "$INSTALL_DIR/$BINARY_NAME was installed but does not run"
+"$INSTALL_DIR/$BINARY_NAME" version | head -1
+
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*) ;;
+  *) echo "Note: $INSTALL_DIR is not on your PATH. Add it with:"
+     echo "  echo 'export PATH=\"$INSTALL_DIR:\$PATH\"' >> ~/.zshrc   # or ~/.bashrc" ;;
+esac
+FIRST=$(command -v "$BINARY_NAME" 2>/dev/null)
+if [ -n "$FIRST" ] && [ "$FIRST" != "$INSTALL_DIR/$BINARY_NAME" ]; then
+  echo "Note: $FIRST comes first on your PATH and will run instead; remove it, then run: hash -r"
 fi
 
 echo "$BINARY_NAME installed successfully!"
